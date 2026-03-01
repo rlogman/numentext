@@ -51,13 +51,18 @@ func (p *Panel) Draw(screen tcell.Screen) {
 		return
 	}
 
+	// Resize PTY+VT to match panel if needed (before locking for draw)
 	p.term.Lock()
 	vt := p.term.VT()
+	needsResize := vt.Cols() != width || vt.Rows() != height
+	p.term.Unlock()
 
-	// Resize VT to match panel dimensions if needed
-	if vt.Cols() != width || vt.Rows() != height {
-		vt.Resize(width, height)
+	if needsResize && width > 0 && height > 0 {
+		p.term.Resize(width, height)
 	}
+
+	p.term.Lock()
+	vt = p.term.VT()
 
 	scrollback := vt.Scrollback()
 	scrollOff := p.scrollOff
@@ -133,7 +138,7 @@ func (p *Panel) Draw(screen tcell.Screen) {
 	}
 
 	// Draw cursor if focused, live view, and terminal running
-	if p.hasFocus && scrollOff == 0 && p.term.Running() {
+	if p.hasFocus && scrollOff == 0 && p.term.RunningNoLock() {
 		curRow := vt.CursorRow()
 		curCol := vt.CursorCol()
 		if curRow >= 0 && curRow < height && curCol >= 0 && curCol < width {
@@ -151,6 +156,9 @@ func (p *Panel) Draw(screen tcell.Screen) {
 	}
 
 	p.term.Unlock()
+
+	// Reset dirty flag so next PTY read can trigger a new redraw
+	p.term.MarkClean()
 }
 
 // InputHandler processes keyboard input, forwarding to PTY

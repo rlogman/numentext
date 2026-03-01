@@ -982,7 +982,9 @@ func (a *App) openTerminal() {
 		a.term = terminal.NewTerminal(80, 24)
 		a.termPanel.SetTerminal(a.term)
 		a.term.SetOnData(func() {
-			a.tviewApp.QueueUpdateDraw(func() {})
+			a.tviewApp.QueueUpdate(func() {
+				a.tviewApp.Draw()
+			})
 		})
 		err := a.term.Start("")
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/creack/pty"
@@ -12,12 +13,13 @@ import (
 
 // Terminal manages a pseudo-terminal session
 type Terminal struct {
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	ptmx    *os.File
-	vt      *VT
-	running bool
-	onData  func() // callback when new data arrives
+	mu        sync.Mutex
+	cmd       *exec.Cmd
+	ptmx      *os.File
+	vt        *VT
+	running   bool
+	onData    func() // callback when new data arrives
+	drawDirty atomic.Bool // debounce flag for redraws
 }
 
 // NewTerminal creates a terminal with the given dimensions
@@ -79,7 +81,8 @@ func (t *Terminal) readLoop() {
 			t.vt.Write(buf[:n])
 			cb := t.onData
 			t.mu.Unlock()
-			if cb != nil {
+			// Debounce: only call back if we haven't already queued a redraw
+			if cb != nil && t.drawDirty.CompareAndSwap(false, true) {
 				cb()
 			}
 		}
@@ -136,6 +139,16 @@ func (t *Terminal) Running() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.running
+}
+
+// RunningNoLock returns running state; caller must hold the lock
+func (t *Terminal) RunningNoLock() bool {
+	return t.running
+}
+
+// MarkClean resets the dirty flag after a draw
+func (t *Terminal) MarkClean() {
+	t.drawDirty.Store(false)
 }
 
 // Stop terminates the shell process
