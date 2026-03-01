@@ -10,10 +10,14 @@
           "title": "Text Buffer Management",
           "description": "",
           "acceptance_criteria": [
-            "The editor shall maintain a line-based text buffer that supports insert, delete, and replace operations at arbitrary positions within the document",
-            "The buffer shall correctly handle multi-line insertions and deletions including line splitting and merging across line boundaries",
-            "The buffer shall normalize all line endings to LF on load, handling CR, CRLF, and LF input transparently",
-            "The buffer shall track its modified state, returning true when content differs from last save and false after a successful save"
+            "Given a newly created buffer, when text is inserted at row 0 col 0, then the buffer contains that text and LineCount reflects the correct number of lines",
+            "Given a buffer with content \"hello world\", when text is inserted at row 0 col 5, then the line reads \"hello world\" split at the insertion with the new text between",
+            "Given a buffer with two lines, when a delete spans from the end of line 1 to the start of line 2, then the two lines merge into one",
+            "Given a file with CRLF line endings, when loaded into a buffer, then all line endings are normalized to LF and LineCount matches the original line count",
+            "Given a file with mixed CR and CRLF endings, when loaded into a buffer, then every line break is treated as a single LF boundary",
+            "Given a buffer with unmodified content, when Modified is queried, then it returns false",
+            "Given a buffer where text has been inserted, when Modified is queried, then it returns true",
+            "Given a modified buffer, when SetModified(false) is called after save, then Modified returns false"
           ],
           "technical_notes": [
             "Current implementation uses a line-based string slice with undo stack",
@@ -28,10 +32,13 @@
           "title": "Undo and Redo",
           "description": "",
           "acceptance_criteria": [
-            "The editor shall maintain an undo stack that records every insert and delete operation with cursor position before and after the change",
-            "Pressing Ctrl+Z shall reverse the most recent operation and restore the cursor to its position before that operation was performed",
-            "Pressing Ctrl+Y shall re-apply the most recently undone operation and restore the cursor to its position after that operation",
-            "Performing a new edit after undoing shall clear the redo stack, making the undone operations no longer recoverable via redo"
+            "Given the user types \"hello\" into an empty buffer, when Ctrl+Z is pressed, then the buffer is empty and the cursor returns to row 0 col 0",
+            "Given the user deletes a word, when Ctrl+Z is pressed, then the deleted word reappears at its original position and the cursor returns to before the delete",
+            "Given the user has pressed Ctrl+Z three times, when Ctrl+Y is pressed once, then the most recently undone operation is re-applied and the cursor moves to its post-edit position",
+            "Given the user undoes two operations then types a new character, when Ctrl+Y is pressed, then nothing happens because the redo stack was cleared by the new edit",
+            "Given an empty undo stack, when Ctrl+Z is pressed, then nothing happens and the buffer remains unchanged",
+            "Given an empty redo stack, when Ctrl+Y is pressed, then nothing happens and the buffer remains unchanged",
+            "Given a multi-line insertion is undone, when the undo completes, then all inserted lines are removed and the cursor returns to the original insertion point"
           ],
           "technical_notes": [
             "Operations stored as EditOp structs with type, text, and cursor positions",
@@ -46,11 +53,17 @@
           "title": "Cursor Movement",
           "description": "",
           "acceptance_criteria": [
-            "Arrow keys shall move the cursor one character or one line in the corresponding direction, wrapping to adjacent lines at line boundaries",
-            "Home and End keys shall move the cursor to the beginning and end of the current line respectively",
-            "Ctrl+Home and Ctrl+End shall move the cursor to the beginning and end of the entire document respectively",
-            "Ctrl+Left and Ctrl+Right shall move the cursor to the previous or next word boundary, skipping whitespace between words",
-            "Page Up and Page Down shall move the cursor by one visible page height, clamping to document boundaries"
+            "Given the cursor is at row 0 col 5, when the Left arrow is pressed, then the cursor moves to row 0 col 4",
+            "Given the cursor is at row 1 col 0, when the Left arrow is pressed, then the cursor moves to the end of row 0",
+            "Given the cursor is at the end of row 0, when the Right arrow is pressed, then the cursor moves to row 1 col 0",
+            "Given the cursor is at row 3 col 10, when the Up arrow is pressed, then the cursor moves to row 2 col 10 or the end of row 2 if it is shorter",
+            "Given the cursor is at row 0 col 5, when Home is pressed, then the cursor moves to row 0 col 0",
+            "Given the cursor is at row 0 col 0, when End is pressed, then the cursor moves to the last column of row 0",
+            "Given a document with 100 lines, when Ctrl+Home is pressed, then the cursor moves to row 0 col 0",
+            "Given a document with 100 lines, when Ctrl+End is pressed, then the cursor moves to the last row and last column of the document",
+            "Given the cursor is at col 10 in \"hello world\", when Ctrl+Left is pressed, then the cursor jumps to col 6 (start of \"world\")",
+            "Given the cursor is at col 0 in \"hello world\", when Ctrl+Right is pressed, then the cursor jumps to col 5 (end of \"hello\" / start of space)",
+            "Given a visible page height of 20 lines and the cursor at row 10, when Page Down is pressed, then the cursor moves to row 29 or the last line if fewer lines exist"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -62,10 +75,12 @@
           "title": "Text Selection",
           "description": "",
           "acceptance_criteria": [
-            "Holding Shift with any cursor movement key shall extend or create a selection from the anchor point to the new cursor position",
-            "Ctrl+A shall select the entire document contents, placing the cursor at the end of the selection",
-            "Any typing or paste operation while a selection is active shall first delete the selected text then insert the new content",
-            "Moving the cursor without Shift held shall clear the current selection and place the cursor at the new position"
+            "Given the cursor is at row 0 col 5 with no selection, when Shift+Right is pressed, then a selection is created from (0,5) to (0,6) and the character at col 5 is visually highlighted",
+            "Given an active selection from (0,5) to (0,8), when Shift+Left is pressed, then the selection shrinks to (0,5) to (0,7)",
+            "Given an active selection from (0,5) to (0,8), when the Right arrow is pressed without Shift, then the selection is cleared and the cursor is at col 8",
+            "Given a 50-line document, when Ctrl+A is pressed, then the entire document is selected from (0,0) to the last character of the last line",
+            "Given text \"world\" is selected, when the user types \"earth\", then \"world\" is deleted and \"earth\" is inserted in its place as a single undoable operation",
+            "Given text \"foo\" is selected and the user presses Shift+Down, then the selection extends from the start of \"foo\" down to the corresponding column on the next line"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -77,10 +92,12 @@
           "title": "Clipboard Integration",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+C shall copy the currently selected text to the operating system clipboard using platform-native commands",
-            "Ctrl+X shall copy the selected text to the clipboard and then delete it from the buffer in a single undoable operation",
-            "Ctrl+V shall insert the operating system clipboard contents at the cursor position, replacing any active selection first",
-            "Clipboard operations shall work on macOS via pbcopy/pbpaste and on Linux via xclip or xsel"
+            "Given text \"hello\" is selected, when Ctrl+C is pressed, then \"hello\" is placed on the OS clipboard and the selection remains active in the editor",
+            "Given text \"hello\" is selected, when Ctrl+X is pressed, then \"hello\" is placed on the OS clipboard and the selected text is removed from the buffer",
+            "Given the OS clipboard contains \"world\" and the cursor is at row 0 col 5, when Ctrl+V is pressed, then \"world\" is inserted at that position and the cursor advances past it",
+            "Given text \"old\" is selected and the clipboard contains \"new\", when Ctrl+V is pressed, then \"old\" is replaced by \"new\" in a single undoable operation",
+            "Given the application is running on macOS, when Ctrl+C is pressed with a selection, then pbcopy receives the selected text via stdin",
+            "Given the application is running on Linux with xclip installed, when Ctrl+V is pressed, then the text from xclip -selection clipboard -o is inserted at the cursor"
           ],
           "technical_notes": [
             "Uses os/exec to shell out to platform clipboard commands",
@@ -95,11 +112,14 @@
           "title": "Multi-Tab Editing",
           "description": "",
           "acceptance_criteria": [
-            "The editor shall support multiple open files as tabs displayed in a tab bar above the editing area",
-            "Clicking a tab or pressing Ctrl+1 through Ctrl+9 shall switch to the corresponding tab, preserving cursor and scroll position per tab",
-            "Ctrl+W shall close the current tab, prompting to save if the buffer has unsaved modifications",
-            "Opening a file that is already open in another tab shall switch to that existing tab instead of creating a duplicate",
-            "The tab bar shall display an asterisk prefix on tab names with unsaved modifications"
+            "Given no tabs are open, when Ctrl+N is pressed, then a new tab labeled \"untitled\" appears in the tab bar and becomes the active tab",
+            "Given tabs \"main.go\" and \"util.go\" are open with \"main.go\" active, when the user clicks the \"util.go\" tab, then \"util.go\" becomes active and its buffer and cursor position are displayed",
+            "Given three tabs are open with tab 2 active, when Ctrl+3 is pressed, then tab 3 becomes active",
+            "Given \"main.go\" is already open in tab 1, when the user opens \"main.go\" again via File Open, then the editor switches to tab 1 instead of creating a duplicate tab",
+            "Given the active tab has unsaved changes, when Ctrl+W is pressed, then a confirmation dialog asks whether to save before closing",
+            "Given the active tab has no unsaved changes, when Ctrl+W is pressed, then the tab closes immediately without a prompt",
+            "Given a tab has been modified, when the tab bar is rendered, then the tab name shows an asterisk prefix like \"*main.go\"",
+            "Given tab 2 is active with cursor at row 10 col 5, when the user switches to tab 1 and back to tab 2, then the cursor is still at row 10 col 5 and the scroll position is preserved"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -111,12 +131,15 @@
           "title": "Basic Text Editing Operations",
           "description": "",
           "acceptance_criteria": [
-            "Typing a printable character shall insert it at the cursor position, advancing the cursor one position to the right",
-            "Enter shall split the current line at the cursor position, creating a new line and moving the cursor to its beginning",
-            "Backspace shall delete the character before the cursor, or merge with the previous line if the cursor is at column zero",
-            "Delete shall remove the character at the cursor position, or merge with the next line if the cursor is at the end of the line",
-            "Tab shall insert four spaces at the cursor position rather than a literal tab character",
-            "Ctrl+D shall delete the entire current line, shifting subsequent lines up to fill the gap"
+            "Given an empty buffer with the cursor at row 0 col 0, when the user types \"a\", then the buffer contains \"a\" and the cursor is at row 0 col 1",
+            "Given the buffer contains \"hllo\" with the cursor at row 0 col 1, when the user types \"e\", then the buffer contains \"hello\" and the cursor is at row 0 col 2",
+            "Given the buffer contains \"hello world\" with the cursor at row 0 col 5, when Enter is pressed, then line 0 becomes \"hello\", line 1 becomes \" world\", and the cursor is at row 1 col 0",
+            "Given the buffer contains \"hello\" with the cursor at row 0 col 3, when Backspace is pressed, then the buffer contains \"helo\" and the cursor is at row 0 col 2",
+            "Given two lines \"hello\" and \"world\" with the cursor at row 1 col 0, when Backspace is pressed, then the lines merge to \"helloworld\" and the cursor is at row 0 col 5",
+            "Given the buffer contains \"hello\" with the cursor at row 0 col 3, when Delete is pressed, then the buffer contains \"helo\" and the cursor stays at row 0 col 3",
+            "Given two lines \"hello\" and \"world\" with the cursor at the end of row 0, when Delete is pressed, then the lines merge to \"helloworld\"",
+            "Given the cursor is at col 0, when Tab is pressed, then four space characters are inserted and the cursor moves to col 4",
+            "Given a three-line buffer with the cursor on line 2, when Ctrl+D is pressed, then line 2 is deleted and the buffer has two lines"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -135,10 +158,12 @@
           "title": "Language Detection",
           "description": "",
           "acceptance_criteria": [
-            "The highlighter shall detect the programming language from the file extension, supporting c, cpp, py, rs, go, js, ts, java, and their variants",
-            "Opening a file with an unrecognized extension shall fall back to plain text mode with no syntax coloring applied",
-            "Changing a file's name via Save As shall re-detect the language and re-apply highlighting for the new file extension",
-            "The detected language name shall be displayed in the status bar for the currently active tab"
+            "Given a file named \"main.go\" is opened, when the highlighter runs, then the detected language is \"Go\" and the status bar shows \"Go\"",
+            "Given a file named \"app.py\" is opened, when the highlighter runs, then the detected language is \"Python\"",
+            "Given a file named \"styles.css\" is opened, when the highlighter runs, then the detected language is \"CSS\"",
+            "Given a file named \"README.txt\" is opened, when the highlighter runs, then the language falls back to \"Text\" and no syntax coloring is applied",
+            "Given a file named \"main.c\" is saved as \"main.py\" via Save As, when the save completes, then the language re-detects as \"Python\" and highlighting updates accordingly",
+            "Given a file is open with language \"Go\" detected, when the status bar renders, then it displays \"Go\" in the language section"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -150,12 +175,13 @@
           "title": "Token Colorization",
           "description": "",
           "acceptance_criteria": [
-            "Keywords and reserved words shall render in white bold text to distinguish them from identifiers and other tokens",
-            "String literals including single-quoted, double-quoted, backtick, and heredoc variants shall render in cyan",
-            "Comments including single-line, multi-line, and documentation comments shall render in gray",
-            "Numeric literals including integers, floats, hex, octal, and binary shall render in magenta",
-            "Type names, class names, and decorators shall render in green to distinguish them from regular identifiers",
-            "Function names at their definition site shall render in white bold"
+            "Given a Go file containing \"func main()\", when rendered, then \"func\" appears in white bold and \"main\" appears in white bold as a function name",
+            "Given a Python file containing 'print(\"hello\")', when rendered, then \"hello\" including quotes appears in cyan",
+            "Given a C file containing \"// comment\", when rendered, then the entire comment line appears in gray",
+            "Given a Rust file containing \"let x = 42;\", when rendered, then \"42\" appears in magenta",
+            "Given a Go file containing \"type Server struct\", when rendered, then \"type\" appears in white bold and \"Server\" appears in green",
+            "Given a JavaScript file containing a multi-line block comment, when rendered, then all lines of the comment appear in gray",
+            "Given a C++ file containing '#include <stdio.h>', when rendered, then the preprocessor directive is colored distinctly from regular code"
           ],
           "technical_notes": [
             "Uses chroma library for lexical analysis",
@@ -171,10 +197,11 @@
           "title": "Highlighting Performance",
           "description": "",
           "acceptance_criteria": [
-            "Syntax highlighting results shall be cached and only recomputed when the buffer content or active tab changes",
-            "The cache shall use a version counter that increments on every edit, avoiding unnecessary re-tokenization on redraws",
-            "Highlighting shall process the entire file as a single unit to ensure multi-line tokens like block comments are handled correctly",
-            "Highlighting shall not block user input; rendering must remain responsive even for files with thousands of lines"
+            "Given a file is open and no edits have occurred since the last render, when Draw is called, then the cached highlight data is reused without re-tokenizing",
+            "Given the user types a character in the buffer, when the highlight version counter is checked, then it has incremented by one since the last edit",
+            "Given the user switches from tab 1 to tab 2, when Draw is called, then the highlight cache is invalidated and tab 2's content is tokenized fresh",
+            "Given a file with 5000 lines, when the user types a character, then the keystroke is processed and the screen redraws within 100 milliseconds",
+            "Given a file containing a block comment spanning 50 lines, when rendered, then all 50 lines of the comment are colored gray because the tokenizer processes the full file"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -193,11 +220,12 @@
           "title": "File Open",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+O shall open a modal file browser dialog showing the current directory contents with directories listed before files",
-            "The dialog shall include a path input field where users can type or paste an absolute path and press Enter to navigate",
-            "Selecting a file in the browser shall open it in a new editor tab and close the dialog, returning focus to the editor",
-            "Selecting a directory shall navigate into it, refreshing the file list to show the new directory contents",
-            "Hidden files and directories whose names begin with a dot shall be excluded from the file browser listing"
+            "Given the user presses Ctrl+O, when the dialog appears, then it shows the current working directory contents with directories sorted before files",
+            "Given the open dialog shows \"/Users/me/project\", when the user clicks a subdirectory \"src\", then the dialog navigates into \"src\" and shows its contents",
+            "Given the open dialog shows files, when the user selects \"main.go\", then \"main.go\" opens in a new editor tab and the dialog closes",
+            "Given the open dialog path input field, when the user types \"/tmp\" and presses Enter, then the dialog navigates to /tmp and lists its contents",
+            "Given a directory containing \".git\" and \".env\" hidden entries, when the open dialog lists files, then the hidden entries are not shown",
+            "Given the open dialog is showing, when the user presses Escape, then the dialog closes without opening any file and focus returns to the editor"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -209,10 +237,11 @@
           "title": "File Save",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+S shall save the current tab's buffer contents to its associated file path, clearing the modified flag on success",
-            "If the current tab has no file path (untitled), Ctrl+S shall behave as Save As, prompting for a file path first",
-            "Save errors such as permission denied or disk full shall display an error message in the output panel without losing buffer content",
-            "After a successful save, the status bar shall briefly display a confirmation message showing the saved file path"
+            "Given a tab editing \"/tmp/test.go\" with modifications, when Ctrl+S is pressed, then the file at \"/tmp/test.go\" is overwritten with the buffer contents and the modified flag clears",
+            "Given an untitled tab with no file path, when Ctrl+S is pressed, then a Save As dialog appears prompting for a file path",
+            "Given a tab editing a file in a read-only directory, when Ctrl+S is pressed, then an error message appears in the output panel and the buffer content is not lost",
+            "Given a successful save of \"/tmp/test.go\", when the save completes, then the status bar displays \"File saved: /tmp/test.go\"",
+            "Given a tab with no modifications, when Ctrl+S is pressed, then the file is saved anyway and the status bar confirms the save"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -224,9 +253,10 @@
           "title": "Save As",
           "description": "",
           "acceptance_criteria": [
-            "Save As shall open a dialog with an input field pre-filled with the current file path or a default path for untitled files",
-            "Confirming the dialog shall write the buffer to the specified path, update the tab name, and re-detect the file language",
-            "The recently opened files list shall be updated to include the new file path after a successful Save As operation"
+            "Given a tab editing \"/tmp/old.go\", when Save As is triggered, then the dialog shows an input field pre-filled with \"/tmp/old.go\"",
+            "Given an untitled tab, when Save As is triggered, then the dialog shows an input field pre-filled with the working directory plus \"/untitled\"",
+            "Given the Save As dialog with path \"/tmp/new.py\", when the user confirms, then the file is written to \"/tmp/new.py\", the tab name updates to \"new.py\", and the language re-detects as Python",
+            "Given a successful Save As to \"/tmp/new.py\", when the config is checked, then \"/tmp/new.py\" appears in the recent files list"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -238,11 +268,12 @@
           "title": "File Tree Browser",
           "description": "",
           "acceptance_criteria": [
-            "A persistent file tree panel shall occupy the left side of the layout, showing the working directory structure as a collapsible tree",
-            "Clicking a file node shall open that file in a new editor tab or switch to its existing tab if already open",
-            "Clicking a directory node shall toggle its expanded or collapsed state, loading children lazily on first expansion",
-            "The file tree shall display a single-character type indicator before each file name based on its extension",
-            "A Refresh option in the Tools menu shall reload the entire file tree to reflect external filesystem changes"
+            "Given the application launches in \"/Users/me/project\", when the file tree renders, then it shows \"project\" as the root node with its immediate children listed",
+            "Given the file tree shows a collapsed directory \"src\", when the user clicks \"src\", then it expands to show its children files and subdirectories",
+            "Given the file tree shows an expanded directory \"src\", when the user clicks \"src\" again, then it collapses and hides its children",
+            "Given the file tree shows \"main.go\", when the user clicks it, then \"main.go\" opens in a new editor tab or the existing tab is activated",
+            "Given a Go file \"main.go\" in the tree, when rendered, then it shows a \"g\" type indicator before the filename",
+            "Given the user selects Tools > Refresh File Tree, when files have been added externally, then the tree reloads and shows the new files"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -254,9 +285,9 @@
           "title": "New File",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+N shall create a new empty tab labeled untitled with no associated file path and an empty buffer",
-            "The new tab shall become the active tab immediately and receive keyboard focus for editing",
-            "Multiple untitled tabs shall be supported simultaneously without naming conflicts"
+            "Given no tabs are open, when Ctrl+N is pressed, then a new tab labeled \"untitled\" appears with an empty buffer and the cursor at row 0 col 0",
+            "Given two tabs are open, when Ctrl+N is pressed, then a third tab \"untitled\" is added and becomes the active tab with focus",
+            "Given one untitled tab exists, when Ctrl+N is pressed again, then a second untitled tab is created without a naming conflict"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -268,9 +299,11 @@
           "title": "Recent Files",
           "description": "",
           "acceptance_criteria": [
-            "The application shall maintain a list of the 20 most recently opened or saved file paths in its configuration file",
-            "The File menu shall include a Recent Files submenu listing these paths, with the most recent file listed first",
-            "Selecting a recent file entry shall open that file in a new tab, or switch to its tab if already open"
+            "Given the user opens \"/tmp/a.go\" then \"/tmp/b.py\", when the config is checked, then the recent files list starts with \"/tmp/b.py\" followed by \"/tmp/a.go\"",
+            "Given 21 files have been opened, when the recent files list is checked, then it contains only the 20 most recent paths",
+            "Given \"/tmp/a.go\" is already in the recent files list at position 5, when \"/tmp/a.go\" is opened again, then it moves to position 1 without duplication",
+            "Given the File menu is opened, when the Recent Files submenu is displayed, then it lists recent paths with the most recent first",
+            "Given a recent file \"/tmp/old.go\" is selected from the menu, when the file still exists, then it opens in a new tab or switches to its existing tab"
           ],
           "technical_notes": [
             "Stored in ~/.numentext/config.json",
@@ -292,10 +325,13 @@
           "title": "Find",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+F shall open a Find dialog with a text input field and a Find Next button",
-            "Find shall perform case-insensitive search forward from the current cursor position, wrapping to the beginning if no match is found",
-            "A successful match shall move the cursor to the match position and select the matched text to make it visually obvious",
-            "If no match is found, the status bar shall display a \"Not found\" message with the search term"
+            "Given the user presses Ctrl+F, when the dialog appears, then it contains a text input field labeled \"Search\" and a \"Find Next\" button",
+            "Given the buffer contains \"hello world hello\" with the cursor at col 0, when the user searches for \"hello\", then the cursor moves to col 0 and the first \"hello\" (col 0-4) is selected",
+            "Given the first \"hello\" is already selected, when Find Next is pressed again, then the cursor moves to the second \"hello\" and selects it",
+            "Given the cursor is past the last occurrence, when Find Next is pressed, then the search wraps to the beginning and finds the first occurrence",
+            "Given the buffer contains \"Hello\" and the user searches for \"hello\", when Find Next is pressed, then \"Hello\" is found because search is case-insensitive",
+            "Given the buffer does not contain \"xyz\", when the user searches for \"xyz\", then the status bar displays \"Not found: xyz\"",
+            "Given the find dialog is open, when the user presses Escape, then the dialog closes and focus returns to the editor"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -307,10 +343,11 @@
           "title": "Replace",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+H shall open a Replace dialog with Find and Replace input fields plus Find, Replace, and Replace All buttons",
-            "Replace shall substitute the currently selected match with the replacement text and then advance to the next match",
-            "Replace All shall substitute every occurrence of the search term throughout the entire buffer in a single undoable operation",
-            "The status bar shall report the number of replacements made after a Replace All operation"
+            "Given the user presses Ctrl+H, when the dialog appears, then it shows Find and Replace input fields plus Find, Replace, and Replace All buttons",
+            "Given \"hello\" is found and selected, when the user enters \"world\" in Replace and clicks Replace, then \"hello\" is replaced with \"world\" and the search advances to the next \"hello\"",
+            "Given a buffer with 5 occurrences of \"foo\", when Replace All is clicked with find \"foo\" and replace \"bar\", then all 5 are replaced and the status bar shows \"Replaced 5 occurrences\"",
+            "Given a Replace All operation, when Ctrl+Z is pressed, then all replacements are undone in a single undo step restoring the original text",
+            "Given no match is currently selected, when Replace is clicked, then the system first performs a Find before attempting replacement"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -322,9 +359,11 @@
           "title": "Go to Line",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+G shall open a dialog with a numeric input field accepting a line number",
-            "Entering a valid line number shall move the cursor to the beginning of that line and scroll to make it visible",
-            "Line numbers outside the valid range shall be clamped to the first or last line of the document without showing an error"
+            "Given the user presses Ctrl+G, when the dialog appears, then it shows a numeric input field labeled \"Line number\"",
+            "Given a 100-line document, when the user enters \"50\" and confirms, then the cursor moves to the beginning of line 50 and the view scrolls to show it",
+            "Given a 100-line document, when the user enters \"200\" and confirms, then the cursor moves to line 100 (the last line) without an error",
+            "Given the user enters \"0\" or a negative number, when confirmed, then the cursor moves to line 1 without an error",
+            "Given the Go to Line dialog is open, when the user presses Escape, then the dialog closes without moving the cursor"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -343,10 +382,14 @@
           "title": "Language Build Commands",
           "description": "",
           "acceptance_criteria": [
-            "The system shall detect the programming language from the file extension and select the appropriate compiler or interpreter command",
-            "C files shall build with gcc using the -Wall flag, C++ with g++ using -Wall and -std=c++17",
-            "Rust files shall compile with rustc, Go files with go build, and Java files with javac",
-            "Python, JavaScript, and TypeScript files shall be treated as interpreted and require no separate build step"
+            "Given a file \"main.c\" is active, when the build system detects the language, then it selects \"gcc\" with flags \"-Wall\" as the build command",
+            "Given a file \"app.cpp\" is active, when the build system detects the language, then it selects \"g++\" with flags \"-Wall -std=c++17\"",
+            "Given a file \"main.rs\" is active, when the build system detects the language, then it selects \"rustc\" as the build command",
+            "Given a file \"main.go\" is active, when the build system detects the language, then it selects \"go build\" as the build command",
+            "Given a file \"script.py\" is active, when the build system checks for a build step, then it returns nil indicating no compilation is needed",
+            "Given a file \"app.js\" is active, when the build system selects the run command, then it chooses \"node app.js\"",
+            "Given a file \"app.ts\" is active, when the build system selects the run command, then it chooses \"npx tsx app.ts\"",
+            "Given a file \"Main.java\" is active, when the build system detects the language, then it selects \"javac\" for build and \"java -cp <dir> Main\" for run"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -358,11 +401,12 @@
           "title": "Run Execution",
           "description": "",
           "acceptance_criteria": [
-            "F5 shall save the current file, compile it if the language requires compilation, and then execute the resulting program",
-            "F9 shall save and compile only, without executing, displaying build success or error messages in the output panel",
-            "The output panel shall display the command being executed, its stdout and stderr output, and the exit code with elapsed time",
-            "Build and run operations shall execute asynchronously so the IDE interface remains responsive during long-running processes",
-            "A 30-second timeout shall terminate processes that run too long, displaying a timeout message in the output panel"
+            "Given a file \"main.go\" with valid code, when F5 is pressed, then the file is saved, \"go run main.go\" executes, and stdout appears in the output panel",
+            "Given a file \"main.c\" with valid code, when F9 is pressed, then the file is saved, gcc compiles it, \"Build successful\" appears, but the program does not execute",
+            "Given a file \"main.c\" with a syntax error, when F5 is pressed, then gcc output shows the error in the output panel and the program does not execute",
+            "Given a running process, when the output panel renders, then it shows the command in cyan, output in white, and the exit code with elapsed time on completion",
+            "Given a program that runs for 35 seconds, when the timeout is reached at 30 seconds, then the process is killed and \"timeout\" appears in the output panel",
+            "Given a build and run is in progress, when the user types in the editor, then keystrokes are processed immediately without waiting for the build to complete"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -374,9 +418,9 @@
           "title": "Process Control",
           "description": "",
           "acceptance_criteria": [
-            "The Run menu shall include a Stop option that terminates any currently running build or execution process",
-            "The output panel shall display a confirmation message when a process is manually stopped by the user",
-            "Starting a new run while a process is active shall terminate the existing process before launching the new one"
+            "Given a process is running, when the user selects Run > Stop, then the process is terminated and the output panel shows \"Process stopped\"",
+            "Given no process is running, when Run > Stop is selected, then nothing happens and no error is displayed",
+            "Given a process is running, when F5 is pressed again, then the existing process is terminated before the new run starts"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -388,10 +432,12 @@
           "title": "Output Panel",
           "description": "",
           "acceptance_criteria": [
-            "The output panel shall occupy the bottom portion of the layout, displaying build and run results with scrollback",
-            "Commands shall be displayed in cyan, error output in red, and success messages in green for visual distinction",
-            "The output panel shall auto-scroll to the latest output and support manual scrolling through previous output",
-            "The Tools menu shall include a Clear Output option that erases all output panel content"
+            "Given the application layout is rendered, when the output panel is visible, then it occupies the bottom 8 rows of the screen",
+            "Given a build command \"gcc main.c\" is executed, when the command starts, then \"> gcc main.c\" appears in cyan in the output panel",
+            "Given a compilation error occurs, when the error text is appended, then it appears in red in the output panel",
+            "Given a successful build, when the success message is appended, then it appears in green",
+            "Given 100 lines of output, when new output is appended, then the panel auto-scrolls to show the latest line",
+            "Given the output panel has content, when Tools > Clear Output is selected, then the output panel becomes empty"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -410,10 +456,10 @@
           "title": "Application Layout",
           "description": "",
           "acceptance_criteria": [
-            "The layout shall consist of a menu bar at top, file tree on the left, editor area in the center, output panel at the bottom, and status bar at the very bottom",
-            "The file tree shall have a fixed width of 20 columns, the output panel a fixed height of 8 rows, and the editor shall fill remaining space",
-            "All panels shall render with the Borland blue color scheme using dark blue backgrounds, cyan accents, and yellow text",
-            "The application shall enable mouse support at startup, allowing click, scroll, and drag interactions throughout the interface"
+            "Given the application starts, when the main window renders, then the menu bar occupies row 0, the file tree occupies 20 columns on the left, the editor fills the remaining center space, the output panel occupies the bottom 8 rows, and the status bar occupies the last row",
+            "Given a terminal window 80 columns wide, when the layout renders, then the file tree is 20 columns and the editor is 60 columns wide",
+            "Given the application starts, when the background is drawn, then the editor area and file tree use dark blue (#000080) and the menu and status bars use cyan",
+            "Given the application starts, when mouse events are checked, then tview.EnableMouse has been called and click events are delivered to components"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -425,12 +471,14 @@
           "title": "Menu Bar",
           "description": "",
           "acceptance_criteria": [
-            "The menu bar shall display eight menus: File, Edit, Search, Run, Tools, Options, Window, and Help",
-            "Clicking a menu label shall open a dropdown showing its items with labels on the left and keyboard shortcuts on the right",
-            "Arrow keys shall navigate between menus horizontally and between items vertically when a dropdown is open",
-            "Pressing Enter on a menu item shall execute its action and close the dropdown, returning focus to the editor",
-            "Pressing Escape or clicking outside the dropdown shall close it without executing any action",
-            "F10 shall open the first menu and focus the menu bar for keyboard-driven navigation"
+            "Given the application is running, when the menu bar renders, then it shows labels: File, Edit, Search, Run, Tools, Options, Window, Help",
+            "Given no menu is open, when the user clicks \"File\", then a dropdown appears showing New, Open, Save, Save As, Close Tab, and Exit with their shortcuts",
+            "Given the File dropdown is open, when the user presses Right arrow, then the File dropdown closes and the Edit dropdown opens",
+            "Given the Edit dropdown is open with \"Undo\" highlighted, when the user presses Down arrow, then \"Redo\" becomes highlighted",
+            "Given the File dropdown is open with \"Save\" highlighted, when the user presses Enter, then the save action executes and the dropdown closes",
+            "Given a dropdown is open, when the user presses Escape, then the dropdown closes and focus returns to the editor",
+            "Given no menu is open, when F10 is pressed, then the File menu opens and the menu bar receives focus",
+            "Given the Run dropdown is open, when the user clicks outside the dropdown area, then the dropdown closes without executing any action"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -442,10 +490,10 @@
           "title": "Status Bar",
           "description": "",
           "acceptance_criteria": [
-            "The status bar shall display the current filename, cursor line and column numbers, detected language, and file encoding",
-            "Modified files shall show a modified indicator next to the filename in the status bar",
-            "The right side of the status bar shall display keyboard shortcut hints: F5 Run, F9 Build, and F10 Menu",
-            "When no file is open, the status bar shall display the application name and a hint about opening or creating files"
+            "Given a file \"main.go\" is open with cursor at row 10 col 5, when the status bar renders, then it displays \"main.go | Ln 11, Col 6 | Go | UTF-8\"",
+            "Given the file \"main.go\" has been modified, when the status bar renders, then it shows \"main.go [modified] | Ln 11, Col 6 | Go | UTF-8\"",
+            "Given the status bar is rendered, when the right side is checked, then it shows \"F5:Run  F9:Build  F10:Menu\"",
+            "Given no tabs are open, when the status bar renders, then it displays \"NumenText\" with a hint to open or create files"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -457,10 +505,11 @@
           "title": "Modal Dialogs",
           "description": "",
           "acceptance_criteria": [
-            "Dialogs shall appear as centered overlays on top of the main layout, capturing all keyboard and mouse input",
-            "All dialogs shall close when the user presses Escape, returning focus to the previously focused component",
-            "Dialog input fields shall use the editor's blue background with white text, and buttons shall use blue background with white text",
-            "A confirmation dialog shall appear when closing a tab with unsaved changes, offering Yes and No options"
+            "Given the user presses Ctrl+F, when the find dialog appears, then it renders centered on the screen overlaying the editor",
+            "Given a dialog is open, when a key is pressed, then only the dialog receives the key event and the editor does not process it",
+            "Given the find dialog is open, when Escape is pressed, then the dialog disappears and focus returns to the editor",
+            "Given a tab with unsaved changes, when Ctrl+W is pressed, then a confirmation dialog appears with the message \"Save changes to <filename>?\" and Yes/No buttons",
+            "Given a dialog is showing, when input fields are rendered, then they use blue background with white text matching the theme"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -472,9 +521,10 @@
           "title": "Welcome Screen",
           "description": "",
           "acceptance_criteria": [
-            "When no tabs are open, the editor area shall display an ASCII art NumenText logo centered in the available space",
-            "The welcome screen shall list the most important keyboard shortcuts: Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Q, F5, F9, Ctrl+F, Ctrl+G, and F10",
-            "The welcome screen shall include the tagline \"A Modern Terminal IDE\" and \"Inspired by Borland C++\""
+            "Given no tabs are open, when the editor area renders, then the NumenText ASCII art logo is displayed centered in the available space",
+            "Given the welcome screen is shown, when the user looks at the content, then it lists shortcuts: Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Q, F5, F9, Ctrl+F, Ctrl+G, F10",
+            "Given the welcome screen is shown, when the text is read, then it includes \"A Modern Terminal IDE\" and \"Inspired by Borland C++\"",
+            "Given no tabs are open, when the user presses Ctrl+N, then the welcome screen is replaced by the new empty tab"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -486,10 +536,11 @@
           "title": "Color Theme",
           "description": "",
           "acceptance_criteria": [
-            "The default theme shall use dark blue (#000080) for editor and file tree backgrounds, cyan for menu bar and status bar",
-            "Editor text shall default to yellow, with white bold for keywords, cyan for strings, gray for comments, and magenta for numbers",
-            "Selected text shall render as black text on a cyan background to provide clear visual contrast",
-            "Active tabs shall display white text on blue, inactive tabs gray text on darker blue, with the tab bar in the darkest blue"
+            "Given the application renders, when the editor background is checked, then it uses dark blue (#000080)",
+            "Given the application renders, when the menu bar colors are checked, then it uses white or black text on a cyan background",
+            "Given text is selected in the editor, when the selection renders, then selected characters show as black text on cyan background",
+            "Given two tabs are open with tab 1 active, when the tab bar renders, then tab 1 shows white text on blue and tab 2 shows gray text on darker blue",
+            "Given a Go file is open, when keywords like \"func\" render, then they appear in white bold; strings in cyan; comments in gray; numbers in magenta"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -508,10 +559,11 @@
           "title": "Configuration File",
           "description": "",
           "acceptance_criteria": [
-            "The application shall store configuration as JSON in ~/.numentext/config.json, creating the directory if it does not exist",
-            "Configuration shall include tab size, theme name, line number visibility, word wrap preference, and the recent files list",
-            "The configuration shall be loaded at startup and saved whenever a preference changes or a file is opened or saved",
-            "Missing or corrupt configuration files shall be silently replaced with default values without displaying errors to the user"
+            "Given no ~/.numentext directory exists, when the application saves config for the first time, then the directory is created and config.json is written inside it",
+            "Given ~/.numentext/config.json exists with valid JSON, when the application starts, then the config values are loaded and applied",
+            "Given ~/.numentext/config.json is corrupted or contains invalid JSON, when the application starts, then default values are used silently without displaying an error",
+            "Given the user opens a file, when the config is saved, then the recent_files array in config.json includes the new file path",
+            "Given the config file is read, when its contents are checked, then it includes keys for tab_size, theme, show_line_numbers, word_wrap, and recent_files"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -523,9 +575,10 @@
           "title": "Preference Options",
           "description": "",
           "acceptance_criteria": [
-            "The Options menu shall include a Toggle Line Numbers item that shows or hides the line number gutter in the editor",
-            "Preference changes shall take effect immediately without requiring a restart or manual reload of the configuration",
-            "All preference values shall persist across sessions by writing to the configuration file after each change"
+            "Given line numbers are currently visible, when the user selects Options > Toggle Line Numbers, then the gutter disappears and the editor content fills the freed space",
+            "Given line numbers are currently hidden, when the user selects Options > Toggle Line Numbers, then the gutter reappears with line numbers displayed",
+            "Given the user toggles line numbers off, when the application is restarted, then line numbers remain off because the preference was persisted to config.json",
+            "Given a preference is changed, when the change takes effect, then the UI updates immediately without requiring a restart"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -544,10 +597,12 @@
           "title": "Global Shortcuts",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+W, and Ctrl+Q shall work from any focused component to create, open, save, close, and quit",
-            "F5, F9, and F10 shall work globally to run the current file, build the current file, and open the menu bar",
-            "Ctrl+F, Ctrl+H, and Ctrl+G shall open the Find, Replace, and Go to Line dialogs from any context",
-            "Escape shall close the current dialog or menu if one is open, otherwise return focus to the editor from any panel"
+            "Given the file tree has focus, when Ctrl+N is pressed, then a new tab is created because Ctrl+N is a global shortcut",
+            "Given the output panel has focus, when Ctrl+S is pressed, then the current file saves because Ctrl+S is a global shortcut",
+            "Given the file tree has focus, when F5 is pressed, then the current file runs because F5 is a global shortcut",
+            "Given the editor has focus, when F10 is pressed, then the menu bar opens with the File menu active",
+            "Given a dialog is open, when Escape is pressed, then the dialog closes; given no dialog is open and the file tree has focus, when Escape is pressed, then focus returns to the editor",
+            "Given a dropdown menu is open, when Escape is pressed, then the menu closes and focus returns to the editor"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -559,11 +614,14 @@
           "title": "Editor Shortcuts",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+Z and Ctrl+Y shall undo and redo within the active editor tab's buffer",
-            "Ctrl+X, Ctrl+C, and Ctrl+V shall cut, copy, and paste using the operating system clipboard",
-            "Ctrl+A shall select all text in the active buffer",
-            "Ctrl+D shall delete the current line",
-            "Ctrl+Tab shall cycle to the next open tab, wrapping from the last tab to the first"
+            "Given the editor has focus and text has been typed, when Ctrl+Z is pressed, then the last edit is undone",
+            "Given the editor has focus and an undo has been performed, when Ctrl+Y is pressed, then the undo is reversed",
+            "Given text \"hello\" is selected, when Ctrl+X is pressed, then \"hello\" is cut to the clipboard and removed from the buffer",
+            "Given text \"hello\" is selected, when Ctrl+C is pressed, then \"hello\" is copied to the clipboard and remains in the buffer",
+            "Given the clipboard contains \"world\", when Ctrl+V is pressed, then \"world\" is inserted at the cursor",
+            "Given the editor has focus, when Ctrl+A is pressed, then all text in the buffer is selected",
+            "Given the cursor is on line 5, when Ctrl+D is pressed, then line 5 is deleted",
+            "Given three tabs are open with tab 1 active, when Ctrl+Tab is pressed, then tab 2 becomes active"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -575,8 +633,9 @@
           "title": "Tab Switching",
           "description": "",
           "acceptance_criteria": [
-            "Ctrl+1 through Ctrl+9 shall switch directly to the tab at that numeric position if it exists",
-            "Ctrl+Tab shall switch to the next tab in order, wrapping around from the last tab to the first tab"
+            "Given tabs \"a.go\", \"b.py\", \"c.rs\" are open, when Ctrl+2 is pressed, then \"b.py\" becomes the active tab",
+            "Given tabs \"a.go\" and \"b.py\" are open, when Ctrl+5 is pressed, then nothing happens because tab 5 does not exist",
+            "Given three tabs with tab 3 active, when Ctrl+Tab is pressed, then tab 1 becomes active because it wraps around"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -595,9 +654,10 @@
           "title": "Editor Mouse Interaction",
           "description": "",
           "acceptance_criteria": [
-            "Left-clicking in the editor area shall position the cursor at the clicked row and column, clearing any active selection",
-            "Scroll wheel shall scroll the editor view vertically by three lines per scroll increment without moving the cursor",
-            "Left-clicking on a tab in the tab bar shall switch to that tab, making it active and displaying its content"
+            "Given a file is open with content visible, when the user left-clicks at screen position corresponding to row 5 col 10, then the cursor moves to row 5 col 10 and any selection is cleared",
+            "Given a file with 200 lines is open and scrolled to line 50, when the user scrolls the mouse wheel down, then the view scrolls down by 3 lines to show line 53 at the top",
+            "Given a file with 200 lines scrolled to line 10, when the user scrolls the mouse wheel up, then the view scrolls up by 3 lines to show line 7 at the top",
+            "Given tabs \"main.go\" and \"util.go\" are shown in the tab bar, when the user clicks on \"util.go\" in the tab bar, then \"util.go\" becomes the active tab"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -609,9 +669,10 @@
           "title": "File Tree Mouse Interaction",
           "description": "",
           "acceptance_criteria": [
-            "Left-clicking a file in the file tree shall open that file in the editor, creating a new tab or switching to an existing one",
-            "Left-clicking a directory node shall toggle its expanded or collapsed state in the tree view",
-            "The file tree shall support scroll wheel navigation when it contains more entries than the visible area"
+            "Given the file tree shows \"main.go\", when the user left-clicks on \"main.go\", then the file opens in the editor in a new tab or the existing tab activates",
+            "Given the file tree shows a collapsed directory \"src\", when the user left-clicks on \"src\", then the directory expands to show its children",
+            "Given the file tree shows an expanded directory \"src\", when the user left-clicks on \"src\" again, then the directory collapses",
+            "Given the file tree has more entries than visible rows, when the user scrolls the mouse wheel in the file tree area, then the tree view scrolls"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -623,9 +684,10 @@
           "title": "Menu Mouse Interaction",
           "description": "",
           "acceptance_criteria": [
-            "Left-clicking a menu label in the menu bar shall open its dropdown, or close it if already open",
-            "Left-clicking a menu item in an open dropdown shall execute that item's action and close the dropdown",
-            "Left-clicking outside an open dropdown shall close the dropdown without executing any action"
+            "Given the menu bar shows \"File Edit Search\", when the user left-clicks on \"Edit\", then the Edit dropdown menu opens",
+            "Given the Edit dropdown is open, when the user left-clicks on \"File\" in the menu bar, then the Edit dropdown closes and the File dropdown opens",
+            "Given the File dropdown is open showing \"New, Open, Save\", when the user clicks \"Open\", then the open file action triggers and the dropdown closes",
+            "Given the File dropdown is open, when the user clicks on the editor area outside the dropdown, then the dropdown closes without executing any action"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -644,9 +706,9 @@
           "title": "Single Binary Distribution",
           "description": "",
           "acceptance_criteria": [
-            "The application shall compile to a single static binary with no external runtime dependencies using standard Go build",
-            "Cross-compilation shall be supported via GOOS and GOARCH environment variables for at least linux/amd64 and darwin/arm64",
-            "The binary shall be functional immediately after copying to a target machine with no installation steps or configuration required"
+            "Given the source code, when \"go build -o numentext .\" is executed, then a single binary is produced with no dynamically linked dependencies other than libc",
+            "Given a macOS build machine, when \"GOOS=linux GOARCH=amd64 go build -o numentext-linux .\" is executed, then a Linux binary is produced that runs on x86_64 Linux machines",
+            "Given a compiled binary, when it is copied to a remote server via scp and executed, then it starts without errors and with no prior installation or configuration"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -658,9 +720,10 @@
           "title": "Platform Compatibility",
           "description": "",
           "acceptance_criteria": [
-            "The application shall run correctly in common terminal emulators including iTerm2, Terminal.app, GNOME Terminal, and Alacritty",
-            "All user interface elements shall use only ASCII characters to ensure correct rendering across all terminal configurations",
-            "The application shall detect the operating system at runtime to select the correct clipboard command for macOS or Linux"
+            "Given the application runs in iTerm2 on macOS, when the UI renders, then all panels, menus, and text display correctly without rendering artifacts",
+            "Given the application runs in GNOME Terminal on Linux, when the UI renders, then all panels, menus, and text display correctly",
+            "Given the application runs in Alacritty, when the UI renders, then all characters display correctly because only ASCII is used for UI elements",
+            "Given the application starts on macOS, when clipboard copy is invoked, then it uses \"pbcopy\"; given Linux, then it uses \"xclip -selection clipboard\""
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -679,10 +742,11 @@
           "title": "PTY Integration",
           "description": "",
           "acceptance_criteria": [
-            "The IDE shall spawn a real pseudo-terminal using the creack/pty library, running the user's default shell",
-            "The embedded terminal shall support interactive programs, ANSI escape sequences, and cursor addressing for full terminal compatibility",
-            "Terminal sessions shall persist across tab switches and panel resizes, maintaining scroll position and shell state",
-            "The terminal shall properly handle window resize events, sending SIGWINCH to update the PTY dimensions"
+            "Given the embedded terminal is activated, when the terminal starts, then a pseudo-terminal is spawned running the user's default shell (from SHELL environment variable)",
+            "Given the terminal is running bash, when the user types \"ls\" and presses Enter, then the directory listing appears in the terminal panel",
+            "Given the terminal is running, when an interactive program like \"top\" is launched, then ANSI escape sequences are interpreted and the screen renders correctly",
+            "Given the terminal is running, when the user switches to another editor tab and back, then the terminal session state, scroll position, and shell history are preserved",
+            "Given the terminal panel is resized, when the resize completes, then SIGWINCH is sent to the PTY and the shell adjusts its column and row count"
           ],
           "technical_notes": [
             "Use github.com/creack/pty for PTY spawning",
@@ -698,10 +762,11 @@
           "title": "Terminal Panel",
           "description": "",
           "acceptance_criteria": [
-            "The terminal shall replace the current output panel as the bottom panel, togglable between terminal mode and output-only mode",
-            "The user shall be able to switch between the terminal and the editor using a keyboard shortcut without losing terminal state",
-            "Build and run output shall optionally be sent to the embedded terminal instead of the output panel for interactive program support",
-            "The terminal panel shall support scrollback of at least 1000 lines of previous output"
+            "Given the application starts, when the output panel is rendered, then there is an option or keybinding to toggle between output-only mode and terminal mode",
+            "Given the terminal mode is active, when the user presses the toggle shortcut, then the panel switches to output-only mode showing build/run results",
+            "Given the terminal is active, when the user presses the shortcut to focus the editor, then focus moves to the editor without killing the terminal process",
+            "Given the user runs a build via F5, when terminal mode is active, then the build output optionally goes to the terminal allowing interactive program input",
+            "Given a terminal session has produced 1500 lines of output, when the user scrolls up, then at least the last 1000 lines are available in the scrollback buffer"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -720,10 +785,12 @@
           "title": "LSP Client Core",
           "description": "",
           "acceptance_criteria": [
-            "The IDE shall include an LSP client that communicates with language servers over stdin/stdout using the JSON-RPC protocol",
-            "The client shall automatically detect and launch the appropriate language server based on the current file's language",
-            "The client shall handle the LSP initialization handshake, capabilities negotiation, and document synchronization lifecycle",
-            "The client shall gracefully handle language server crashes by displaying an error and allowing manual restart"
+            "Given a Go file is opened and gopls is installed, when the LSP client initializes, then it spawns gopls, sends the initialize request, and receives the server's capabilities",
+            "Given the LSP client has initialized, when the user opens a file, then a textDocument/didOpen notification is sent with the file URI and contents",
+            "Given the user edits a file, when a character is typed, then a textDocument/didChange notification is sent with the incremental change",
+            "Given the language server process crashes, when the client detects the broken pipe, then it displays \"Language server crashed\" in the status bar and allows restart via the Tools menu",
+            "Given a Python file is opened and pyright is installed, when the LSP client initializes, then it launches pyright and completes the handshake",
+            "Given a file type with no known language server, when the file is opened, then no LSP client is started and the editor functions normally without code intelligence"
           ],
           "technical_notes": [
             "Common servers: gopls (Go), clangd (C/C++), pyright (Python), rust-analyzer (Rust), typescript-language-server (JS/TS)",
@@ -738,10 +805,12 @@
           "title": "Autocomplete",
           "description": "",
           "acceptance_criteria": [
-            "The editor shall request completions from the language server as the user types, displaying suggestions in a popup near the cursor",
-            "Arrow keys shall navigate the completion list, Enter or Tab shall insert the selected completion, and Escape shall dismiss it",
-            "Completions shall include function signatures, variable names, type names, and module members as provided by the language server",
-            "The completion popup shall appear automatically after typing a trigger character such as a dot or double colon"
+            "Given a Go file with \"fmt.\" typed, when the dot trigger character is entered, then a completion popup appears listing Printf, Println, Sprintf, and other fmt members",
+            "Given the completion popup is visible with 5 items, when the user presses Down arrow twice, then the third item is highlighted",
+            "Given the completion popup shows \"Println\" highlighted, when the user presses Enter, then \"Println\" is inserted at the cursor and the popup closes",
+            "Given the completion popup is visible, when the user presses Escape, then the popup closes without inserting anything",
+            "Given the completion popup is visible, when the user continues typing \"Pr\", then the list filters to show only completions starting with \"Pr\"",
+            "Given a Python file with \"os.path.\" typed, when the dot is entered, then completions for os.path members appear"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -753,10 +822,11 @@
           "title": "Diagnostics",
           "description": "",
           "acceptance_criteria": [
-            "The editor shall display language server diagnostics as colored markers in the gutter: red for errors, yellow for warnings",
-            "Hovering or moving the cursor to a line with a diagnostic shall display the diagnostic message in the status bar",
-            "Diagnostics shall update in real time as the user edits, reflecting the latest analysis from the language server",
-            "The output panel shall provide a summary list of all current diagnostics with file, line, and message"
+            "Given a Go file with an undefined variable \"x\", when the language server responds with diagnostics, then a red marker appears in the gutter on the line containing \"x\"",
+            "Given a Python file with an unused import, when the language server sends a warning diagnostic, then a yellow marker appears in the gutter",
+            "Given the cursor moves to a line with a diagnostic, when the line is focused, then the diagnostic message (e.g., \"undefined: x\") displays in the status bar",
+            "Given multiple diagnostics exist, when the output panel summary is checked, then it lists each diagnostic with filename, line number, and message",
+            "Given a diagnostic exists on line 10, when the user fixes the error and the language server sends updated diagnostics without line 10, then the red marker on line 10 disappears"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -768,10 +838,10 @@
           "title": "Go to Definition",
           "description": "",
           "acceptance_criteria": [
-            "A keyboard shortcut shall send a go-to-definition request to the language server for the symbol under the cursor",
-            "If the definition is in the current file, the cursor shall jump to that location with the source line centered on screen",
-            "If the definition is in a different file, that file shall open in a new tab with the cursor positioned at the definition",
-            "If no definition is found, the status bar shall display a message indicating no definition was available"
+            "Given the cursor is on a function call \"DoWork()\" in a Go file, when the go-to-definition shortcut is pressed, then the cursor jumps to the line where DoWork is defined",
+            "Given the definition of \"DoWork\" is in \"worker.go\", when go-to-definition is triggered, then \"worker.go\" opens in a new tab with the cursor at the definition line",
+            "Given the definition is 100 lines below in the same file, when go-to-definition completes, then the cursor moves to that line and the view scrolls to center it",
+            "Given the cursor is on a variable with no definition available, when go-to-definition is triggered, then the status bar displays \"No definition found\""
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -783,9 +853,11 @@
           "title": "Hover Information",
           "description": "",
           "acceptance_criteria": [
-            "A keyboard shortcut shall request hover information from the language server for the symbol under the cursor",
-            "Hover results shall display in a tooltip popup near the cursor showing type signatures, documentation, or other metadata",
-            "The popup shall dismiss when the user presses Escape, moves the cursor, or begins typing"
+            "Given the cursor is on a function name \"Printf\" in a Go file, when the hover shortcut is pressed, then a popup appears showing \"func fmt.Printf(format string, a ...any) (n int, err error)\"",
+            "Given the cursor is on a type name \"Server\", when the hover shortcut is pressed, then a popup shows the type definition and any documentation comments",
+            "Given the hover popup is visible, when the user presses Escape, then the popup closes",
+            "Given the hover popup is visible, when the user moves the cursor to a different line, then the popup closes",
+            "Given the hover popup is visible, when the user starts typing, then the popup closes and the typed character is inserted normally"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -804,10 +876,11 @@
           "title": "DAP Client Core",
           "description": "",
           "acceptance_criteria": [
-            "The IDE shall include a DAP client that communicates with debug adapters over stdin/stdout using the JSON protocol",
-            "The client shall support the launch and attach request types for starting or connecting to debug sessions",
-            "The client shall handle the DAP initialization sequence, capabilities exchange, and session lifecycle events",
-            "The client shall support at minimum Go (delve), Python (debugpy), C/C++ (gdb/lldb via cpptools), and Rust (codelldb) adapters"
+            "Given a Go file is active and dlv (Delve) is installed, when a debug session is started, then the DAP client launches Delve in DAP mode and completes the initialize/launch handshake",
+            "Given a Python file is active and debugpy is installed, when a debug session is started, then debugpy launches and the session initializes",
+            "Given the debug adapter crashes during a session, when the DAP client detects the failure, then it displays \"Debug adapter disconnected\" in the status bar and cleans up the session",
+            "Given a launch request is sent, when the adapter responds with success, then the program begins execution and the status bar shows \"Debugging\"",
+            "Given an attach request is configured, when the session starts, then the DAP client connects to the running process instead of launching a new one"
           ],
           "technical_notes": [
             "DAP is simpler than LSP, fewer message types",
@@ -822,10 +895,11 @@
           "title": "Breakpoints",
           "description": "",
           "acceptance_criteria": [
-            "The user shall be able to toggle a breakpoint on the current line using a keyboard shortcut, displaying a red marker in the gutter",
-            "Breakpoints shall be sent to the debug adapter when a debug session starts and updated in real time during the session",
-            "The editor shall visually highlight the current execution line during a debug pause with a distinct background color",
-            "Breakpoints shall persist within a session but do not need to be saved across application restarts"
+            "Given the cursor is on line 15, when the toggle-breakpoint shortcut is pressed, then a red marker appears in the gutter on line 15",
+            "Given line 15 has a breakpoint set, when the toggle-breakpoint shortcut is pressed again on line 15, then the red marker is removed",
+            "Given breakpoints are set on lines 10 and 20, when a debug session starts, then the DAP client sends setBreakpoints with both line numbers",
+            "Given the program is paused at line 10, when the editor renders, then line 10 has a distinct background color indicating the current execution point",
+            "Given a breakpoint is toggled during an active debug session, when the breakpoint changes, then the DAP client sends an updated setBreakpoints request immediately"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -837,9 +911,12 @@
           "title": "Stepping and Control",
           "description": "",
           "acceptance_criteria": [
-            "The debug menu or toolbar shall provide Continue, Step Over, Step Into, Step Out, and Stop controls for debug sessions",
-            "Each stepping action shall update the current execution line indicator and refresh the variable display",
-            "The status bar shall indicate when a debug session is active and whether the program is running or paused at a breakpoint"
+            "Given the program is paused at a breakpoint on line 10, when Continue is pressed, then execution resumes until the next breakpoint or program exit",
+            "Given the program is paused at line 10, when Step Over is pressed, then execution advances to line 11 (or the next statement) and pauses",
+            "Given the program is paused at a function call on line 10, when Step Into is pressed, then execution enters the called function and pauses at its first line",
+            "Given the program is inside a function, when Step Out is pressed, then execution continues until the function returns and pauses at the caller",
+            "Given the program is running, when Stop is pressed, then the debug session terminates and the status bar returns to normal mode",
+            "Given the program is paused at line 20, when Step Over is pressed, then the execution line indicator moves from line 20 to the next line and the variable display refreshes"
           ],
           "technical_notes": [],
           "complexity": "Medium",
@@ -851,9 +928,11 @@
           "title": "Variable Inspection",
           "description": "",
           "acceptance_criteria": [
-            "When paused at a breakpoint, a variables panel shall display local variables, function arguments, and their current values",
-            "Variables with complex types shall be expandable to show their fields or elements in a tree structure",
-            "The variable display shall update automatically after each stepping operation to reflect the current program state"
+            "Given the program is paused at a breakpoint in a function with local variable x=42, when the variables panel renders, then it shows \"x: 42\"",
+            "Given a function has parameters name=\"hello\" and count=3, when the variables panel renders, then both appear with their current values",
+            "Given a local variable \"server\" is a struct with fields Host and Port, when the user expands \"server\" in the variables panel, then it shows \"Host: localhost\" and \"Port: 8080\"",
+            "Given a variable \"items\" is a slice with 3 elements, when expanded, then it shows the index and value of each element",
+            "Given the program steps from line 10 to line 11 where x changes from 42 to 43, when the variable panel refreshes, then x shows the new value 43"
           ],
           "technical_notes": [],
           "complexity": "Medium",
