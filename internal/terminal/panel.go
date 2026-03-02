@@ -203,6 +203,42 @@ func (p *Panel) InputHandler() func(event *tcell.EventKey, setFocus func(tview.P
 	})
 }
 
+// MouseHandler handles mouse events (scrolling)
+func (p *Panel) MouseHandler() func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(tview.Primitive)) (bool, tview.Primitive) {
+	return p.WrapMouseHandler(func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(tview.Primitive)) (bool, tview.Primitive) {
+		if !p.InRect(event.Position()) {
+			return false, nil
+		}
+
+		if p.term == nil {
+			return false, nil
+		}
+
+		switch action {
+		case tview.MouseScrollUp:
+			p.scrollOff += 3
+			p.term.Lock()
+			maxScroll := len(p.term.VT().Scrollback())
+			p.term.Unlock()
+			if p.scrollOff > maxScroll {
+				p.scrollOff = maxScroll
+			}
+			return true, nil
+		case tview.MouseScrollDown:
+			p.scrollOff -= 3
+			if p.scrollOff < 0 {
+				p.scrollOff = 0
+			}
+			return true, nil
+		case tview.MouseLeftClick:
+			setFocus(p)
+			return true, nil
+		}
+
+		return false, nil
+	})
+}
+
 // Focus marks this panel as focused
 func (p *Panel) Focus(delegate func(tview.Primitive)) {
 	p.hasFocus = true
