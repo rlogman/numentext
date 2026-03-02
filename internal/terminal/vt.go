@@ -31,6 +31,9 @@ type VT struct {
 	// Parser state
 	state    parseState
 	paramBuf []byte
+
+	// Block tracking for command boxing
+	blocks *BlockTracker
 }
 
 type parseState int
@@ -49,6 +52,7 @@ func NewVT(cols, rows int) *VT {
 		maxScroll: 1000,
 		fg:        tcell.ColorWhite,
 		bg:        tcell.ColorDefault,
+		blocks:    NewBlockTracker(),
 	}
 	vt.cells = vt.makeGrid(cols, rows)
 	return vt
@@ -103,6 +107,11 @@ func (vt *VT) Scrollback() [][]Cell {
 	return vt.scrollback
 }
 
+// Blocks returns the block tracker for command boxing.
+func (vt *VT) Blocks() *BlockTracker {
+	return vt.blocks
+}
+
 // Write processes raw terminal output bytes
 func (vt *VT) Write(data []byte) {
 	for _, b := range data {
@@ -118,8 +127,10 @@ func (vt *VT) processByte(b byte) {
 			vt.state = stateEsc
 			vt.paramBuf = nil
 		case '\n':
+			vt.blocks.FeedNewline()
 			vt.lineFeed()
 		case '\r':
+			vt.blocks.FeedCR()
 			vt.curCol = 0
 		case '\t':
 			vt.curCol = (vt.curCol + 8) &^ 7
@@ -180,10 +191,23 @@ func (vt *VT) processByte(b byte) {
 		}
 	case stateOSC:
 		if b == 0x07 || b == 0x1b { // BEL or ESC terminates OSC
+			vt.handleOSC()
 			vt.state = stateNormal
+		} else {
+			vt.paramBuf = append(vt.paramBuf, b)
 		}
-		// Otherwise accumulate and ignore OSC sequences
 	}
+}
+
+func (vt *VT) handleOSC() {
+	// Check for OSC 133 shell integration: "133;X" where X is A/B/C/D
+	if len(vt.paramBuf) >= 4 &&
+		vt.paramBuf[0] == '1' && vt.paramBuf[1] == '3' && vt.paramBuf[2] == '3' && vt.paramBuf[3] == ';' {
+		if len(vt.paramBuf) >= 5 {
+			vt.blocks.HandleOSC133(vt.paramBuf[4])
+		}
+	}
+	// Other OSC sequences are ignored (window title, etc.)
 }
 
 func (vt *VT) putChar(ch rune) {
@@ -200,6 +224,7 @@ func (vt *VT) putChar(ch rune) {
 		}
 	}
 	vt.curCol++
+	vt.blocks.FeedChar(ch)
 }
 
 func (vt *VT) lineFeed() {
@@ -396,8 +421,24 @@ func (vt *VT) handleCSI(final byte) {
 		}
 	case 'r': // Set scrolling region — simplified, just reset
 		// Ignore scroll region for now
-	case 'h', 'l': // Set/reset mode — ignore most
-		// Ignore
+	case 'h': // Set mode
+		// Check for DEC private mode ?1049h (alternate screen)
+		if len(vt.paramBuf) > 0 && vt.paramBuf[0] == '?' {
+			for _, p := range params {
+				if p == 1049 || p == 47 || p == 1047 {
+					vt.blocks.SetAltScreen(true)
+				}
+			}
+		}
+	case 'l': // Reset mode
+		// Check for DEC private mode ?1049l (normal screen)
+		if len(vt.paramBuf) > 0 && vt.paramBuf[0] == '?' {
+			for _, p := range params {
+				if p == 1049 || p == 47 || p == 1047 {
+					vt.blocks.SetAltScreen(false)
+				}
+			}
+		}
 	case 'n': // Device status report — ignore
 	case 's': // Save cursor
 		vt.savedRow = vt.curRow

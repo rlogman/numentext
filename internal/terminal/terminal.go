@@ -99,7 +99,14 @@ func (t *Terminal) readLoop() {
 func (t *Terminal) WriteInput(data []byte) {
 	t.mu.Lock()
 	ptmx := t.ptmx
+	bt := t.vt.Blocks()
+
+	// Heuristic: on Enter, if no OSC 133 is in use, create a block from the current line
+	if len(data) == 1 && data[0] == '\r' && !bt.HasOSC133() {
+		bt.HeuristicEnter()
+	}
 	t.mu.Unlock()
+
 	if ptmx != nil {
 		_, _ = ptmx.Write(data)
 	}

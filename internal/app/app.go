@@ -79,6 +79,9 @@ func (a *App) setupUI() {
 	a.fileTree = filetree.New(a.workDir)
 	a.output = output.New()
 	a.termPanel = terminal.NewPanel()
+	a.termPanel.SetOnStatus(func(msg string) {
+		a.statusBar.SetMessage(msg)
+	})
 
 	// Wire callbacks
 	a.editor.SetOnChange(func() {
@@ -215,6 +218,7 @@ func (a *App) setupMenus() {
 		Accel: 't',
 		Items: []*ui.MenuItem{
 			{Label: "Terminal", Shortcut: "Ctrl+`", Action: a.toggleTerminal},
+			{Label: "Toggle Block Mode", Accel: 'b', Action: a.toggleBlockMode},
 			{Label: "Restart LSP", Accel: 'l', Action: a.restartLSP},
 			{Label: "Clear Output", Action: func() {
 				a.output.Clear()
@@ -1026,6 +1030,16 @@ func (a *App) showShortcuts() {
  Ctrl+Shift+T        New terminal session (when terminal focused)
  Ctrl+W              Close tab / Close terminal session
 
+ [white::b]Terminal Block Mode[-::-]
+ Ctrl+Up/Down        Select prev/next command block
+ Enter               Toggle expand/collapse (when block selected)
+ y                   Copy block (cmd+output) to clipboard
+ c                   Copy command only
+ o                   Copy output only
+ e                   Expand all blocks
+ a                   Collapse all blocks
+ Escape              Deselect block
+
  Press Escape to close
 `
 	text.SetText(content)
@@ -1363,6 +1377,16 @@ func (a *App) prevTerminal() {
 	}
 	a.activeTermIdx = (a.activeTermIdx - 1 + len(a.terms)) % len(a.terms)
 	a.updateTermPanel()
+}
+
+func (a *App) toggleBlockMode() {
+	on := !a.termPanel.BoxMode()
+	a.termPanel.SetBoxMode(on)
+	if on {
+		a.statusBar.SetMessage("Terminal block mode ON")
+	} else {
+		a.statusBar.SetMessage("Terminal block mode OFF")
+	}
 }
 
 func (a *App) openTerminal() {
