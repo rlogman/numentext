@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Client manages communication with a debug adapter
@@ -218,12 +219,27 @@ func (c *Client) Stop() {
 	}
 	c.mu.Unlock()
 
-	_ = c.Disconnect(true)
+	// Try graceful disconnect with a short timeout
+	done := make(chan struct{})
+	go func() {
+		_ = c.Disconnect(true)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+	}
 
 	c.mu.Lock()
 	c.running = false
 	if c.stdin != nil {
 		_ = c.stdin.Close()
+	}
+	// Close pending channels
+	for seq, ch := range c.pending {
+		close(ch)
+		delete(c.pending, seq)
 	}
 	if c.cmd != nil && c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
@@ -266,14 +282,21 @@ func (c *Client) call(command string, args interface{}) (*Response, error) {
 		return nil, err
 	}
 
-	resp := <-ch
-	if resp == nil {
-		return nil, fmt.Errorf("connection closed")
+	select {
+	case resp := <-ch:
+		if resp == nil {
+			return nil, fmt.Errorf("connection closed")
+		}
+		if !resp.Success {
+			return nil, fmt.Errorf("DAP error: %s", resp.Message)
+		}
+		return resp, nil
+	case <-time.After(10 * time.Second):
+		c.mu.Lock()
+		delete(c.pending, seq)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("DAP request timed out: %s", command)
 	}
-	if !resp.Success {
-		return nil, fmt.Errorf("DAP error: %s", resp.Message)
-	}
-	return resp, nil
 }
 
 func (c *Client) send(msg interface{}) error {

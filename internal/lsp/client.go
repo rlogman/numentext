@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Client manages communication with a language server
@@ -243,14 +244,31 @@ func (c *Client) Stop() {
 	}
 	c.mu.Unlock()
 
-	_ = c.Shutdown()
-	c.Exit()
+	// Try graceful shutdown with a short timeout
+	done := make(chan struct{})
+	go func() {
+		_ = c.Shutdown()
+		c.Exit()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+	}
 
 	c.mu.Lock()
 	c.running = false
+	// Close stdin to unblock readLoop
 	if c.stdin != nil {
 		_ = c.stdin.Close()
 	}
+	// Close pending channels
+	for id, ch := range c.pending {
+		close(ch)
+		delete(c.pending, id)
+	}
+	// Force kill the process
 	if c.cmd != nil && c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
 	}
@@ -292,14 +310,21 @@ func (c *Client) call(method string, params interface{}) (*Response, error) {
 		return nil, err
 	}
 
-	resp := <-ch
-	if resp == nil {
-		return nil, fmt.Errorf("connection closed")
+	select {
+	case resp := <-ch:
+		if resp == nil {
+			return nil, fmt.Errorf("connection closed")
+		}
+		if resp.Error != nil {
+			return nil, fmt.Errorf("LSP error %d: %s", resp.Error.Code, resp.Error.Message)
+		}
+		return resp, nil
+	case <-time.After(10 * time.Second):
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("LSP request timed out: %s", method)
 	}
-	if resp.Error != nil {
-		return nil, fmt.Errorf("LSP error %d: %s", resp.Error.Code, resp.Error.Message)
-	}
-	return resp, nil
 }
 
 func (c *Client) notify(method string, params interface{}) {
