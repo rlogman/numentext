@@ -111,6 +111,15 @@ func (a *App) setupUI() {
 		a.tviewApp.SetFocus(a.editor)
 	})
 
+	// Auto-show/hide output panel based on content
+	a.output.SetOnChange(func(hasContent bool) {
+		if hasContent {
+			a.layout.SetOutputVisible(true, 8)
+		} else if !a.termVisible {
+			a.layout.SetOutputVisible(false, 0)
+		}
+	})
+
 	// Bottom panel: output by default, can switch to terminal
 	a.bottomFlex = tview.NewFlex()
 	a.bottomFlex.AddItem(a.output, 0, 1, false)
@@ -197,7 +206,9 @@ func (a *App) setupMenus() {
 		Items: []*ui.MenuItem{
 			{Label: "Terminal", Shortcut: "Ctrl+`", Action: a.toggleTerminal},
 			{Label: "Restart LSP", Accel: 'l', Action: a.restartLSP},
-			{Label: "Clear Output", Action: func() { a.output.Clear() }},
+			{Label: "Clear Output", Action: func() {
+				a.output.Clear()
+			}},
 			{Label: "Refresh File Tree", Accel: 'f', Action: func() { a.fileTree.Refresh() }},
 		},
 	}
@@ -1077,6 +1088,7 @@ func (a *App) openTerminal() {
 	a.bottomFlex.Clear()
 	a.bottomFlex.AddItem(a.termPanel, 0, 1, true)
 	a.termVisible = true
+	a.layout.SetOutputVisible(true, 8)
 	a.tviewApp.SetFocus(a.termPanel)
 }
 
@@ -1084,6 +1096,10 @@ func (a *App) closeTerminal() {
 	a.bottomFlex.Clear()
 	a.bottomFlex.AddItem(a.output, 0, 1, false)
 	a.termVisible = false
+	// Hide output panel if there's no output content
+	if len(a.output.Lines()) == 0 {
+		a.layout.SetOutputVisible(false, 0)
+	}
 	a.tviewApp.SetFocus(a.editor)
 }
 

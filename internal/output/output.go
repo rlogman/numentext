@@ -13,7 +13,8 @@ import (
 // Panel is the output/terminal panel for build/run results
 type Panel struct {
 	*tview.TextView
-	lines []string
+	lines    []string
+	onChange func(hasContent bool)
 }
 
 func New() *Panel {
@@ -34,12 +35,24 @@ func New() *Panel {
 	return p
 }
 
+// SetOnChange sets a callback when content changes (true = has content, false = empty)
+func (p *Panel) SetOnChange(fn func(hasContent bool)) {
+	p.onChange = fn
+}
+
+func (p *Panel) notifyChange() {
+	if p.onChange != nil {
+		p.onChange(len(p.lines) > 0)
+	}
+}
+
 // AppendText adds text to the output panel
 func (p *Panel) AppendText(text string) {
 	newLines := strings.Split(text, "\n")
 	p.lines = append(p.lines, newLines...)
 	p.updateContent()
 	p.ScrollToEnd()
+	p.notifyChange()
 }
 
 // AppendCommand shows a command being run
@@ -61,6 +74,12 @@ func (p *Panel) AppendSuccess(text string) {
 func (p *Panel) Clear() {
 	p.lines = []string{}
 	p.updateContent()
+	p.notifyChange()
+}
+
+// Lines returns the current output lines
+func (p *Panel) Lines() []string {
+	return p.lines
 }
 
 func (p *Panel) updateContent() {
