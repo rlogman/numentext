@@ -224,19 +224,64 @@ func TestHeuristicCommand(t *testing.T) {
 		t.Errorf("expected 'ls -la', got %q", bt.Blocks[0].Command)
 	}
 
-	// Feed output
+	// Feed output — heuristic blocks capture output since no OSC 133
 	bt.FeedChar('t')
 	bt.FeedChar('o')
 	bt.FeedChar('t')
 	bt.FeedNewline()
 
-	if len(bt.Blocks[0].Output) != 0 {
-		t.Errorf("heuristic block should not capture output without inOutput flag, got %d lines", len(bt.Blocks[0].Output))
+	if len(bt.Blocks[0].Output) != 1 {
+		t.Errorf("heuristic block should capture output, got %d lines", len(bt.Blocks[0].Output))
+	}
+	if bt.Blocks[0].Output[0] != "tot" {
+		t.Errorf("expected output 'tot', got %q", bt.Blocks[0].Output[0])
 	}
 
 	// Empty command should not create a block
 	bt.HeuristicCommand("")
 	if bt.BlockCount() != 1 {
 		t.Errorf("empty command should not create block, got %d", bt.BlockCount())
+	}
+}
+
+func TestHeuristicEnter(t *testing.T) {
+	bt := NewBlockTracker()
+
+	// Simulate typing "ls" then pressing Enter
+	bt.FeedChar('l')
+	bt.FeedChar('s')
+	bt.HeuristicEnter()
+
+	if bt.BlockCount() != 1 {
+		t.Fatalf("expected 1 block, got %d", bt.BlockCount())
+	}
+	if bt.Blocks[0].Command != "ls" {
+		t.Errorf("expected 'ls', got %q", bt.Blocks[0].Command)
+	}
+
+	// Output arrives
+	bt.FeedChar('f')
+	bt.FeedChar('o')
+	bt.FeedChar('o')
+	bt.FeedNewline()
+
+	if len(bt.Blocks[0].Output) != 1 {
+		t.Errorf("expected 1 output line, got %d", len(bt.Blocks[0].Output))
+	}
+
+	// Next command finishes the first block
+	bt.FeedChar('p')
+	bt.FeedChar('w')
+	bt.FeedChar('d')
+	bt.HeuristicEnter()
+
+	if bt.BlockCount() != 2 {
+		t.Fatalf("expected 2 blocks, got %d", bt.BlockCount())
+	}
+	if !bt.Blocks[0].Finished {
+		t.Error("first block should be finished")
+	}
+	if bt.Blocks[1].Command != "pwd" {
+		t.Errorf("expected 'pwd', got %q", bt.Blocks[1].Command)
 	}
 }

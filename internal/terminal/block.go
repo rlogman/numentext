@@ -100,8 +100,12 @@ func (bt *BlockTracker) FeedNewline() {
 	if bt.altScreen {
 		return
 	}
-	if bt.inOutput && bt.active != nil {
-		bt.active.Output = append(bt.active.Output, bt.curLine)
+	// Capture output: either in OSC 133 output phase, or in heuristic mode
+	// with an active unfinished block
+	if bt.active != nil && !bt.active.Finished {
+		if bt.inOutput || !bt.hasSeenOSC133 {
+			bt.active.Output = append(bt.active.Output, bt.curLine)
+		}
 	}
 	bt.curLine = ""
 }

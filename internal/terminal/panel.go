@@ -163,7 +163,7 @@ func (p *Panel) Draw(screen tcell.Screen) {
 		return
 	}
 
-	// Resize PTY+VT to match panel if needed (before locking for draw)
+	// Resize PTY+VT to match panel (always full size — box mode just renders differently)
 	p.term.Lock()
 	vt := p.term.VT()
 	needsResize := vt.Cols() != width || vt.Rows() != height
@@ -176,9 +176,9 @@ func (p *Panel) Draw(screen tcell.Screen) {
 	p.term.Lock()
 	vt = p.term.VT()
 	bt := vt.Blocks()
+	useBoxed := p.boxMode && bt.BlockCount() > 0 && !bt.AltScreen()
 
-	// Use boxed rendering if enabled, blocks exist, and not in alt screen
-	if p.boxMode && bt.BlockCount() > 0 && !bt.AltScreen() {
+	if useBoxed {
 		p.drawBoxed(screen, x, y, width, height, vt, bt)
 	} else {
 		p.drawRaw(screen, x, y, width, height, vt)
@@ -188,6 +188,18 @@ func (p *Panel) Draw(screen tcell.Screen) {
 
 	// Reset dirty flag so next PTY read can trigger a new redraw
 	p.term.MarkClean()
+}
+
+// liveAreaRows calculates how many rows should be allocated to the live terminal area.
+func (p *Panel) liveAreaRows(totalHeight int) int {
+	live := totalHeight / 2
+	if live < 4 {
+		live = 4
+	}
+	if live > totalHeight {
+		live = totalHeight
+	}
+	return live
 }
 
 // drawBoxed renders command blocks as ASCII boxes, with a live area at the bottom.
@@ -202,7 +214,6 @@ func (p *Panel) drawBoxed(screen tcell.Screen, x, y, width, height int, vt *VT, 
 	row := 0
 
 	// Calculate how many rows we need for all blocks
-	// and figure out scroll offset if blocks overflow
 	totalRows := 0
 	for i, blk := range bt.Blocks {
 		if !blk.Finished {
@@ -211,14 +222,14 @@ func (p *Panel) drawBoxed(screen tcell.Screen, x, y, width, height int, vt *VT, 
 		totalRows += p.blockHeight(blk, width, i == p.selectedBlock)
 	}
 
-	// Reserve some rows for the live area (at least 3 rows: border + 1 line + border)
-	liveRows := height / 3
-	if liveRows < 3 {
-		liveRows = 3
-	}
-	blockArea := height - liveRows
+	// The live area shows the VT region around the cursor
+	liveRows := p.liveAreaRows(height)
+	blockArea := height - liveRows - 1 // -1 for separator line
 	if blockArea < 0 {
 		blockArea = 0
+	}
+	if blockArea > height-2 {
+		blockArea = height - 2 // at least 1 row for separator + 1 for live
 	}
 
 	// If total block rows exceed blockArea, skip leading blocks
@@ -272,11 +283,21 @@ func (p *Panel) drawBoxed(screen tcell.Screen, x, y, width, height int, vt *VT, 
 		row++
 	}
 
-	// Draw live VT content in the remaining rows
+	// Draw live VT content in the remaining rows.
+	// Show the VT rows around the cursor so the prompt is always visible.
 	liveStart := row
+	availLive := height - liveStart
+	curRow := vt.CursorRow()
+
+	// Calculate which VT row to start from so the cursor is visible
+	vtStartRow := curRow - availLive + 1
+	if vtStartRow < 0 {
+		vtStartRow = 0
+	}
+
 	for row < height {
-		vtRow := row - liveStart
-		if vtRow < vt.Rows() {
+		vtRow := vtStartRow + (row - liveStart)
+		if vtRow >= 0 && vtRow < vt.Rows() {
 			for col := 0; col < width && col < vt.Cols(); col++ {
 				cell := vt.Cell(vtRow, col)
 				style := tcell.StyleDefault.Foreground(cell.Fg).Background(cell.Bg)
@@ -297,9 +318,8 @@ func (p *Panel) drawBoxed(screen tcell.Screen, x, y, width, height int, vt *VT, 
 
 	// Draw cursor in the live area if focused and terminal running
 	if p.hasFocus && p.term.RunningNoLock() {
-		curRow := vt.CursorRow()
 		curCol := vt.CursorCol()
-		screenCurRow := liveStart + curRow
+		screenCurRow := liveStart + (curRow - vtStartRow)
 		if screenCurRow >= liveStart && screenCurRow < height && curCol >= 0 && curCol < width {
 			cell := vt.Cell(curRow, curCol)
 			style := tcell.StyleDefault.
