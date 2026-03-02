@@ -431,6 +431,13 @@ func (a *App) setupKeybindings() {
 						a.cycleKeyboardMode()
 						return nil
 					}
+				case 'p':
+					if mod&tcell.ModShift != 0 {
+						a.showCommandPalette()
+					} else {
+						a.showFilePalette()
+					}
+					return nil
 				case 'w':
 					a.closeTab()
 					return nil
@@ -495,6 +502,66 @@ func (a *App) updateStatusBar() {
 	// Update mode indicator
 	km := a.editor.KeyMode()
 	a.statusBar.SetModeInfo(km.SubModeLabel(), km.PendingDisplay())
+}
+
+// showCommandPalette opens the command palette overlay.
+func (a *App) showCommandPalette() {
+	commands := a.buildPaletteCommands()
+	palette := ui.NewCommandPalette(commands, func() {
+		// onExecute: close palette, refocus editor
+		a.layout.HideDialog("palette")
+		a.tviewApp.SetFocus(a.editor)
+	}, func() {
+		// onClose: dismiss without executing
+		a.layout.HideDialog("palette")
+		a.tviewApp.SetFocus(a.editor)
+	})
+	a.layout.ShowDialog("palette", palette)
+	a.tviewApp.SetFocus(palette)
+}
+
+// showFilePalette opens the file finder overlay (Ctrl+P).
+func (a *App) showFilePalette() {
+	files := ui.WalkProjectFiles(a.workDir)
+	palette := ui.NewFilePalette(files, func(entry ui.FileEntry) {
+		// onSelect: open the file in a new tab, close palette, refocus editor
+		a.layout.HideDialog("filepalette")
+		err := a.editor.OpenFile(entry.FullPath)
+		if err != nil {
+			a.output.AppendError("Error opening file: " + err.Error())
+		} else {
+			a.config.AddRecentFile(entry.FullPath)
+			a.config.Save()
+		}
+		a.tviewApp.SetFocus(a.editor)
+	}, func() {
+		// onClose: dismiss without opening
+		a.layout.HideDialog("filepalette")
+		a.tviewApp.SetFocus(a.editor)
+	})
+	a.layout.ShowDialog("filepalette", palette)
+	a.tviewApp.SetFocus(palette)
+}
+
+// buildPaletteCommands collects all menu items into a flat list of PaletteCommands.
+func (a *App) buildPaletteCommands() []ui.PaletteCommand {
+	var commands []ui.PaletteCommand
+	for _, menu := range a.menuBar.Menus() {
+		if menu.OnOpen != nil {
+			menu.OnOpen()
+		}
+		for _, item := range menu.Items {
+			if item.Disabled || item.Action == nil {
+				continue
+			}
+			commands = append(commands, ui.PaletteCommand{
+				Label:    menu.Label + ": " + item.Label,
+				Shortcut: item.Shortcut,
+				Action:   item.Action,
+			})
+		}
+	}
+	return commands
 }
 
 // Actions
@@ -1180,8 +1247,10 @@ func (a *App) cycleKeyboardMode() {
 func (a *App) Run() error {
 	defer a.lspManager.StopAll()
 	defer a.dapManager.StopSession()
-	if a.term != nil {
-		defer a.term.Stop()
-	}
+	defer func() {
+		if a.term != nil {
+			a.term.Stop()
+		}
+	}()
 	return a.tviewApp.Run()
 }
