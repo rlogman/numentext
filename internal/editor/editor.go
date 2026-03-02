@@ -11,6 +11,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"numentext/internal/editor/keymode"
 	"numentext/internal/ui"
 )
 
@@ -57,6 +58,17 @@ type Editor struct {
 
 	// Breakpoint check callback (returns true if breakpoint at 1-based line)
 	hasBreakpoint func(filePath string, line int) bool
+
+	// Keyboard mode
+	keyMode keymode.KeyMapper
+
+	// Action callbacks for actions that need app-level handling
+	onSearchForward func()
+	onSearchNext    func()
+	onSearchPrev    func()
+
+	// Last search query for n/N repeat
+	lastSearch string
 }
 
 // DiagnosticInfo holds diagnostic data for a single line
@@ -72,6 +84,7 @@ func NewEditor() *Editor {
 		showLineNumbers: true,
 		completion:      NewCompletionPopup(),
 		diagnostics:     make(map[string]map[int]DiagnosticInfo),
+		keyMode:         keymode.NewDefaultMode(),
 	}
 	e.SetBorder(false)
 	return e
@@ -153,6 +166,43 @@ func (e *Editor) notifyTabChange() {
 func (e *Editor) SetHasBreakpoint(fn func(filePath string, line int) bool) {
 	e.hasBreakpoint = fn
 }
+
+// KeyMode returns the current key mapper
+func (e *Editor) KeyMode() keymode.KeyMapper {
+	return e.keyMode
+}
+
+// SetKeyMode sets the keyboard mode
+func (e *Editor) SetKeyMode(km keymode.KeyMapper) {
+	e.keyMode = km
+}
+
+// KeyModeContext builds a KeyContext from the current editor state
+func (e *Editor) KeyModeContext() keymode.KeyContext {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return keymode.KeyContext{}
+	}
+	_, _, _, height := e.GetInnerRect()
+	return keymode.KeyContext{
+		CursorRow:    tab.CursorRow,
+		CursorCol:    tab.CursorCol,
+		LineLen:      len(tab.Buffer.Line(tab.CursorRow)),
+		LineCount:    tab.Buffer.LineCount(),
+		CurrentLine:  tab.Buffer.Line(tab.CursorRow),
+		HasSelection: tab.HasSelect,
+		PageHeight:   height - 1, // minus tab bar
+	}
+}
+
+// SetOnSearchForward sets the callback for / search action
+func (e *Editor) SetOnSearchForward(fn func()) { e.onSearchForward = fn }
+
+// SetOnSearchNext sets the callback for n search action
+func (e *Editor) SetOnSearchNext(fn func()) { e.onSearchNext = fn }
+
+// SetOnSearchPrev sets the callback for N search action
+func (e *Editor) SetOnSearchPrev(fn func()) { e.onSearchPrev = fn }
 
 // Diagnostics methods
 
@@ -835,6 +885,148 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 			tab.CursorCol = pos[1]
 			e.clearSelection(tab)
 		}
+
+	// Extended actions for keyboard modes
+	case ActionOverwriteChar:
+		if tab.HasSelect {
+			e.deleteSelection(tab)
+		}
+		lineLen := len(tab.Buffer.Line(tab.CursorRow))
+		if tab.CursorCol < lineLen {
+			// Delete char at cursor, then insert
+			tab.Buffer.Delete(tab.CursorRow, tab.CursorCol, tab.CursorRow, tab.CursorCol+1, [2]int{tab.CursorRow, tab.CursorCol})
+		}
+		cursor := [2]int{tab.CursorRow, tab.CursorCol}
+		newPos := tab.Buffer.Insert(tab.CursorRow, tab.CursorCol, string(ch), cursor)
+		tab.CursorRow = newPos[0]
+		tab.CursorCol = newPos[1]
+
+	case ActionJoinLine:
+		if tab.CursorRow < tab.Buffer.LineCount()-1 {
+			// Remove newline between current and next line, add a space
+			nextLine := tab.Buffer.Line(tab.CursorRow + 1)
+			curLineLen := len(tab.Buffer.Line(tab.CursorRow))
+			tab.Buffer.Delete(tab.CursorRow, curLineLen, tab.CursorRow+1, 0, [2]int{tab.CursorRow, tab.CursorCol})
+			// Add space if next line is non-empty and doesn't start with space
+			if len(nextLine) > 0 && nextLine[0] != ' ' {
+				cursor := [2]int{tab.CursorRow, curLineLen}
+				tab.Buffer.Insert(tab.CursorRow, curLineLen, " ", cursor)
+			}
+			tab.CursorCol = curLineLen
+		}
+
+	case ActionOpenLineBelow:
+		// Insert new line below cursor and move to it
+		lineLen := len(tab.Buffer.Line(tab.CursorRow))
+		cursor := [2]int{tab.CursorRow, lineLen}
+		tab.Buffer.Insert(tab.CursorRow, lineLen, "\n", cursor)
+		tab.CursorRow++
+		tab.CursorCol = 0
+
+	case ActionOpenLineAbove:
+		// Insert new line above cursor and move to it
+		cursor := [2]int{tab.CursorRow, 0}
+		tab.Buffer.Insert(tab.CursorRow, 0, "\n", cursor)
+		tab.CursorCol = 0
+
+	case ActionDeleteCharForward:
+		if tab.HasSelect {
+			e.deleteSelection(tab)
+		} else {
+			lineLen := len(tab.Buffer.Line(tab.CursorRow))
+			if tab.CursorCol < lineLen {
+				e.clipboardCopy(string(tab.Buffer.Line(tab.CursorRow)[tab.CursorCol]))
+				tab.Buffer.Delete(tab.CursorRow, tab.CursorCol, tab.CursorRow, tab.CursorCol+1, [2]int{tab.CursorRow, tab.CursorCol})
+			}
+		}
+
+	case ActionPasteAfter:
+		text := e.clipboardPaste()
+		if text != "" {
+			// Move cursor right one, then paste
+			lineLen := len(tab.Buffer.Line(tab.CursorRow))
+			col := tab.CursorCol
+			if col < lineLen {
+				col++
+			}
+			cursor := [2]int{tab.CursorRow, col}
+			newPos := tab.Buffer.Insert(tab.CursorRow, col, text, cursor)
+			tab.CursorRow = newPos[0]
+			tab.CursorCol = newPos[1]
+		}
+
+	case ActionPasteBefore:
+		text := e.clipboardPaste()
+		if text != "" {
+			cursor := [2]int{tab.CursorRow, tab.CursorCol}
+			tab.Buffer.Insert(tab.CursorRow, tab.CursorCol, text, cursor)
+		}
+
+	case ActionYankLine:
+		line := tab.Buffer.Line(tab.CursorRow)
+		e.clipboardCopy(line + "\n")
+
+	case ActionDeleteToLineEnd:
+		lineLen := len(tab.Buffer.Line(tab.CursorRow))
+		if tab.CursorCol < lineLen {
+			text := tab.Buffer.Line(tab.CursorRow)[tab.CursorCol:]
+			e.clipboardCopy(text)
+			tab.Buffer.Delete(tab.CursorRow, tab.CursorCol, tab.CursorRow, lineLen, [2]int{tab.CursorRow, tab.CursorCol})
+		}
+
+	case ActionChangeToLineEnd:
+		lineLen := len(tab.Buffer.Line(tab.CursorRow))
+		if tab.CursorCol < lineLen {
+			text := tab.Buffer.Line(tab.CursorRow)[tab.CursorCol:]
+			e.clipboardCopy(text)
+			tab.Buffer.Delete(tab.CursorRow, tab.CursorCol, tab.CursorRow, lineLen, [2]int{tab.CursorRow, tab.CursorCol})
+		}
+
+	case ActionCursorFirstNonBlank:
+		e.clearSelection(tab)
+		line := tab.Buffer.Line(tab.CursorRow)
+		for i, ch := range line {
+			if !unicode.IsSpace(ch) {
+				tab.CursorCol = i
+				break
+			}
+		}
+
+	case ActionSelectLine:
+		// Select the current line (Helix x)
+		tab.HasSelect = true
+		tab.SelectStart = [2]int{tab.CursorRow, 0}
+		lineLen := len(tab.Buffer.Line(tab.CursorRow))
+		tab.SelectEnd = [2]int{tab.CursorRow, lineLen}
+		tab.CursorCol = lineLen
+
+	case ActionExtendLineSelect:
+		// Extend selection to include next line (Helix X)
+		if !tab.HasSelect {
+			tab.HasSelect = true
+			tab.SelectStart = [2]int{tab.CursorRow, 0}
+		}
+		if tab.CursorRow < tab.Buffer.LineCount()-1 {
+			tab.CursorRow++
+		}
+		lineLen := len(tab.Buffer.Line(tab.CursorRow))
+		tab.SelectEnd = [2]int{tab.CursorRow, lineLen}
+		tab.CursorCol = lineLen
+
+	case ActionSearchForward:
+		if e.onSearchForward != nil {
+			e.onSearchForward()
+		}
+	case ActionSearchNext:
+		if e.onSearchNext != nil {
+			e.onSearchNext()
+		}
+	case ActionSearchPrev:
+		if e.onSearchPrev != nil {
+			e.onSearchPrev()
+		}
+	case ActionEnterCommandMode:
+		// Handled by the key mode itself
 	}
 
 	e.clampCursor(tab)
@@ -845,9 +1037,16 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 // Find searches for text and positions cursor
 func (e *Editor) Find(query string, forward bool) bool {
 	tab := e.ActiveTab()
-	if tab == nil || query == "" {
+	if tab == nil {
 		return false
 	}
+	if query == "" {
+		query = e.lastSearch
+	}
+	if query == "" {
+		return false
+	}
+	e.lastSearch = query
 
 	startRow := tab.CursorRow
 	startCol := tab.CursorCol
@@ -1095,7 +1294,19 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		cursorScreenX := x + gutterW + tab.CursorCol - tab.ScrollCol
 		cursorScreenY := y + tab.CursorRow - tab.ScrollRow
 		if cursorScreenY >= y && cursorScreenY < y+height && cursorScreenX >= x+gutterW && cursorScreenX < x+width {
-			screen.ShowCursor(cursorScreenX, cursorScreenY)
+			if e.keyMode.CursorStyle() == keymode.CursorBlock {
+				// Block cursor: draw char at cursor position with reversed colors
+				ch := ' '
+				line := tab.Buffer.Line(tab.CursorRow)
+				if tab.CursorCol < len(line) {
+					ch = rune(line[tab.CursorCol])
+				}
+				style := tcell.StyleDefault.Foreground(ui.ColorBg).Background(ui.ColorText)
+				screen.SetContent(cursorScreenX, cursorScreenY, ch, nil, style)
+				screen.HideCursor()
+			} else {
+				screen.ShowCursor(cursorScreenX, cursorScreenY)
+			}
 		}
 	}
 
@@ -1263,17 +1474,35 @@ func (e *Editor) InputHandler() func(event *tcell.EventKey, setFocus func(p tvie
 			}
 		}
 
-		action := MapKey(event)
-		if action != ActionNone {
-			e.HandleAction(action, event.Rune())
+		// Use the key mapper to process the event
+		ctx := e.KeyModeContext()
+		result := e.keyMode.ProcessKey(event, ctx)
+
+		if result.Handled {
+			if len(result.Actions) > 0 {
+				// Execute compound actions
+				for _, act := range result.Actions {
+					e.HandleAction(Action(act), result.Char)
+				}
+			} else if result.Action != int(ActionNone) {
+				e.HandleAction(Action(result.Action), result.Char)
+			}
+		} else {
+			// Fallback to direct MapKey for unhandled keys
+			action := MapKey(event)
+			if action != ActionNone {
+				e.HandleAction(action, event.Rune())
+				result.Action = int(action)
+				result.Char = event.Rune()
+			}
 		}
 
 		// After inserting a character, check for completion triggers
-		if action == ActionInsertChar {
-			e.maybeRequestCompletion(event.Rune())
+		if Action(result.Action) == ActionInsertChar {
+			e.maybeRequestCompletion(result.Char)
 		}
 		// If typing while popup visible, update the filter
-		if e.completion.Visible() && action == ActionInsertChar {
+		if e.completion.Visible() && Action(result.Action) == ActionInsertChar {
 			e.updateCompletionPrefix()
 		}
 	})

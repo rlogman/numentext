@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"numentext/internal/config"
 	"numentext/internal/dap"
 	"numentext/internal/editor"
+	"numentext/internal/editor/keymode"
 	"numentext/internal/filetree"
 	"numentext/internal/lsp"
 	"numentext/internal/output"
@@ -82,6 +84,21 @@ func (a *App) setupUI() {
 		a.updateStatusBar()
 	})
 
+	// Search callbacks for Vi/Helix modes
+	a.editor.SetOnSearchForward(func() {
+		a.showFind()
+	})
+	a.editor.SetOnSearchNext(func() {
+		if !a.editor.Find("", true) {
+			a.statusBar.SetMessage("No matches")
+		}
+	})
+	a.editor.SetOnSearchPrev(func() {
+		if !a.editor.Find("", false) {
+			a.statusBar.SetMessage("No matches")
+		}
+	})
+
 	a.fileTree.SetOnFileOpen(func(path string) {
 		err := a.editor.OpenFile(path)
 		if err != nil {
@@ -104,12 +121,16 @@ func (a *App) setupUI() {
 	a.tviewApp.SetRoot(a.layout.Pages, true)
 	a.tviewApp.SetFocus(a.editor)
 	a.tviewApp.EnableMouse(true)
+
+	// Init keyboard mode from config
+	a.setKeyboardMode(a.config.KeyboardMode)
 }
 
 func (a *App) setupMenus() {
 	// File menu — rebuilt on each open to include recent files
 	fileMenu := &ui.Menu{
 		Label: "File",
+		Accel: 'f',
 		Items: a.buildFileMenuItems(),
 	}
 	fileMenu.OnOpen = func() {
@@ -119,24 +140,26 @@ func (a *App) setupMenus() {
 	// Edit menu
 	editMenu := &ui.Menu{
 		Label: "Edit",
+		Accel: 'e',
 		Items: []*ui.MenuItem{
 			{Label: "Undo", Shortcut: "Ctrl+Z", Action: func() { a.editor.HandleAction(editor.ActionUndo, 0) }},
 			{Label: "Redo", Shortcut: "Ctrl+Y", Action: func() { a.editor.HandleAction(editor.ActionRedo, 0) }},
 			{Label: "Cut", Shortcut: "Ctrl+X", Action: func() { a.editor.HandleAction(editor.ActionCut, 0) }},
 			{Label: "Copy", Shortcut: "Ctrl+C", Action: func() { a.editor.HandleAction(editor.ActionCopy, 0) }},
 			{Label: "Paste", Shortcut: "Ctrl+V", Action: func() { a.editor.HandleAction(editor.ActionPaste, 0) }},
-			{Label: "Select All", Shortcut: "Ctrl+A", Action: func() { a.editor.HandleAction(editor.ActionSelectAll, 0) }},
+			{Label: "Select All", Shortcut: "Ctrl+A", Accel: 'a', Action: func() { a.editor.HandleAction(editor.ActionSelectAll, 0) }},
 		},
 	}
 
 	// Search menu
 	searchMenu := &ui.Menu{
 		Label: "Search",
+		Accel: 's',
 		Items: []*ui.MenuItem{
 			{Label: "Find...", Shortcut: "Ctrl+F", Action: a.showFind},
 			{Label: "Replace...", Shortcut: "Ctrl+H", Action: a.showReplace},
-			{Label: "Go to Line...", Shortcut: "Ctrl+G", Action: a.showGoToLine},
-			{Label: "Go to Definition", Shortcut: "F12", Action: a.goToDefinition},
+			{Label: "Go to Line...", Shortcut: "Ctrl+G", Accel: 'l', Action: a.showGoToLine},
+			{Label: "Go to Definition", Shortcut: "F12", Accel: 'd', Action: a.goToDefinition},
 			{Label: "Hover Info", Shortcut: "F11", Action: a.showHover},
 		},
 	}
@@ -144,6 +167,7 @@ func (a *App) setupMenus() {
 	// Run menu
 	runMenu := &ui.Menu{
 		Label: "Run",
+		Accel: 'r',
 		Items: []*ui.MenuItem{
 			{Label: "Run", Shortcut: "F5", Action: a.runFile},
 			{Label: "Build", Shortcut: "F9", Action: a.buildFile},
@@ -154,35 +178,50 @@ func (a *App) setupMenus() {
 	// Debug menu
 	debugMenu := &ui.Menu{
 		Label: "Debug",
+		Accel: 'd',
 		Items: []*ui.MenuItem{
 			{Label: "Start Debug", Shortcut: "F5", Action: a.startDebug},
 			{Label: "Toggle Breakpoint", Shortcut: "F8", Action: a.toggleBreakpoint},
 			{Label: "Continue", Shortcut: "F6", Action: a.debugContinue},
-			{Label: "Step Over", Shortcut: "F7", Action: a.debugStepOver},
-			{Label: "Step In", Action: a.debugStepIn},
-			{Label: "Step Out", Action: a.debugStepOut},
-			{Label: "Stop Debug", Action: a.stopDebug},
+			{Label: "Step Over", Shortcut: "F7", Accel: 'v', Action: a.debugStepOver},
+			{Label: "Step In", Shortcut: "", Accel: 'i', Action: a.debugStepIn},
+			{Label: "Step Out", Accel: 'o', Action: a.debugStepOut},
+			{Label: "Stop Debug", Accel: 'p', Action: a.stopDebug},
 		},
 	}
 
 	// Tools menu
 	toolsMenu := &ui.Menu{
 		Label: "Tools",
+		Accel: 't',
 		Items: []*ui.MenuItem{
 			{Label: "Terminal", Shortcut: "Ctrl+`", Action: a.toggleTerminal},
-			{Label: "Restart LSP", Action: a.restartLSP},
+			{Label: "Restart LSP", Accel: 'l', Action: a.restartLSP},
 			{Label: "Clear Output", Action: func() { a.output.Clear() }},
-			{Label: "Refresh File Tree", Action: func() { a.fileTree.Refresh() }},
+			{Label: "Refresh File Tree", Accel: 'f', Action: func() { a.fileTree.Refresh() }},
 		},
 	}
 
 	// Options menu
 	optionsMenu := &ui.Menu{
 		Label: "Options",
+		Accel: 'o',
 		Items: []*ui.MenuItem{
 			{Label: "Toggle Line Numbers", Action: func() {
 				a.config.ShowLineNum = !a.config.ShowLineNum
 				a.editor.SetShowLineNumbers(a.config.ShowLineNum)
+				a.config.Save()
+			}},
+			{Label: "Keyboard: Default", Shortcut: "Ctrl+Shift+M", Action: func() {
+				a.setKeyboardMode("default")
+				a.config.Save()
+			}},
+			{Label: "Keyboard: Vi", Action: func() {
+				a.setKeyboardMode("vi")
+				a.config.Save()
+			}},
+			{Label: "Keyboard: Helix", Action: func() {
+				a.setKeyboardMode("helix")
 				a.config.Save()
 			}},
 		},
@@ -191,6 +230,7 @@ func (a *App) setupMenus() {
 	// Window menu
 	windowMenu := &ui.Menu{
 		Label: "Window",
+		Accel: 'w',
 		Items: []*ui.MenuItem{
 			{Label: "Next Tab", Shortcut: "Ctrl+Tab", Action: a.nextTab},
 			{Label: "Close Tab", Shortcut: "Ctrl+W", Action: a.closeTab},
@@ -200,9 +240,10 @@ func (a *App) setupMenus() {
 	// Help menu
 	helpMenu := &ui.Menu{
 		Label: "Help",
+		Accel: 'h',
 		Items: []*ui.MenuItem{
 			{Label: "About NumenText", Action: a.showAbout},
-			{Label: "Keyboard Shortcuts", Action: a.showShortcuts},
+			{Label: "Keyboard Shortcuts", Accel: 'k', Action: a.showShortcuts},
 		},
 	}
 
@@ -222,7 +263,7 @@ func (a *App) buildFileMenuItems() []*ui.MenuItem {
 		{Label: "New", Shortcut: "Ctrl+N", Action: a.newFile},
 		{Label: "Open...", Shortcut: "Ctrl+O", Action: a.openFile},
 		{Label: "Save", Shortcut: "Ctrl+S", Action: a.saveFile},
-		{Label: "Save As...", Action: a.saveFileAs},
+		{Label: "Save As...", Accel: 'a', Action: a.saveFileAs},
 		{Label: "Close Tab", Shortcut: "Ctrl+W", Action: a.closeTab},
 	}
 
@@ -247,7 +288,7 @@ func (a *App) buildFileMenuItems() []*ui.MenuItem {
 	}
 
 	items = append(items, &ui.MenuItem{Label: "---", Disabled: true})
-	items = append(items, &ui.MenuItem{Label: "Exit", Shortcut: "Ctrl+Q", Action: a.quit})
+	items = append(items, &ui.MenuItem{Label: "Exit", Shortcut: "Ctrl+Q", Accel: 'x', Action: a.quit})
 
 	return items
 }
@@ -273,6 +314,31 @@ func (a *App) setupKeybindings() {
 		// If a dialog is open, only intercept Escape (let dialog handle it)
 		if hasDialog {
 			return event
+		}
+
+		// Alt+letter: open or switch menus
+		// Detect via ModAlt (Linux/iTerm2 with Esc+) or macOS Option Unicode chars
+		accelRune := rune(0)
+		if key == tcell.KeyRune && mod&tcell.ModAlt != 0 {
+			accelRune = event.Rune()
+		} else if key == tcell.KeyRune && mod == 0 && runtime.GOOS == "darwin" {
+			accelRune = macOptionRune(event.Rune())
+		}
+		if accelRune != 0 {
+			idx := a.menuBar.MenuForAccel(accelRune)
+			if idx >= 0 {
+				if a.menuBar.IsOpen() {
+					// Synthesize an Alt+letter event for the menubar's InputHandler
+					altEvent := tcell.NewEventKey(tcell.KeyRune, accelRune, tcell.ModAlt)
+					a.menuBar.InputHandler()(altEvent, func(p tview.Primitive) {
+						a.tviewApp.SetFocus(p)
+					})
+					return nil
+				}
+				a.menuBar.Open(idx)
+				a.tviewApp.SetFocus(a.menuBar)
+				return nil
+			}
 		}
 
 		// If menu is open, handle menu-specific keys
@@ -349,6 +415,11 @@ func (a *App) setupKeybindings() {
 						a.saveFile()
 					}
 					return nil
+				case 'm':
+					if mod&tcell.ModShift != 0 {
+						a.cycleKeyboardMode()
+						return nil
+					}
 				case 'w':
 					a.closeTab()
 					return nil
@@ -364,6 +435,15 @@ func (a *App) setupKeybindings() {
 				case 'g':
 					a.showGoToLine()
 					return nil
+				}
+			}
+
+			// When Vi/Helix Normal mode is active and editor has focus,
+			// don't intercept plain rune keys — let them pass to the editor's InputHandler
+			if !ctrl && a.editor.HasFocus() {
+				km := a.editor.KeyMode()
+				if km.SubMode() == keymode.SubModeNormal || km.SubMode() == keymode.SubModeVisual || km.SubMode() == keymode.SubModeVisualLine || km.SubMode() == keymode.SubModeCommand {
+					return event // Let editor handle it
 				}
 			}
 		case tcell.KeyTab:
@@ -401,6 +481,9 @@ func (a *App) updateStatusBar() {
 		a.statusBar.Update("", 0, 0, "", false)
 		a.statusBar.SetMessage("NumenText - Press Ctrl+N for new file, Ctrl+O to open")
 	}
+	// Update mode indicator
+	km := a.editor.KeyMode()
+	a.statusBar.SetModeInfo(km.SubModeLabel(), km.PendingDisplay())
 }
 
 // Actions
@@ -982,9 +1065,7 @@ func (a *App) openTerminal() {
 		a.term = terminal.NewTerminal(80, 24)
 		a.termPanel.SetTerminal(a.term)
 		a.term.SetOnData(func() {
-			a.tviewApp.QueueUpdate(func() {
-				a.tviewApp.Draw()
-			})
+			a.tviewApp.QueueUpdateDraw(func() {})
 		})
 		err := a.term.Start("")
 		if err != nil {
@@ -1004,6 +1085,79 @@ func (a *App) closeTerminal() {
 	a.bottomFlex.AddItem(a.output, 0, 1, false)
 	a.termVisible = false
 	a.tviewApp.SetFocus(a.editor)
+}
+
+// macOptionRune maps macOS Option+letter Unicode characters back to their
+// base ASCII letter. macOS Terminal.app sends these instead of ModAlt events.
+// Returns 0 if the rune is not a recognized Option+letter character.
+func macOptionRune(r rune) rune {
+	switch r {
+	case 0x0192: // ƒ = Option+F
+		return 'f'
+	case 0x00B4: // ´ = Option+E
+		return 'e'
+	case 0x00DF: // ß = Option+S
+		return 's'
+	case 0x00AE: // ® = Option+R
+		return 'r'
+	case 0x2202: // ∂ = Option+D
+		return 'd'
+	case 0x2020: // † = Option+T
+		return 't'
+	case 0x00F8: // ø = Option+O
+		return 'o'
+	case 0x2211: // ∑ = Option+W
+		return 'w'
+	case 0x02D9: // ˙ = Option+H
+		return 'h'
+	}
+	return 0
+}
+
+func (a *App) setKeyboardMode(mode string) {
+	switch mode {
+	case "vi":
+		vi := keymode.NewViMode()
+		vi.Callbacks = &keymode.ViCommandCallback{
+			OnSave:     a.saveFile,
+			OnQuit:     a.quit,
+			OnSaveQuit: func() { a.saveFile(); a.quit() },
+			OnGoToLine: func(line int) { a.editor.GoToLine(line) },
+		}
+		vi.OnCommandStart = func(prompt string) {
+			a.statusBar.SetCommandText(prompt)
+		}
+		vi.OnCommandUpdate = func(text string) {
+			a.statusBar.SetCommandText(text)
+		}
+		vi.OnCommandEnd = func() {
+			a.statusBar.SetCommandText("")
+		}
+		a.editor.SetKeyMode(vi)
+	case "helix":
+		a.editor.SetKeyMode(keymode.NewHelixMode())
+	default:
+		mode = "default"
+		a.editor.SetKeyMode(keymode.NewDefaultMode())
+	}
+	a.config.KeyboardMode = mode
+	a.updateStatusBar()
+}
+
+func (a *App) cycleKeyboardMode() {
+	current := a.config.KeyboardMode
+	var next string
+	switch current {
+	case "default":
+		next = "vi"
+	case "vi":
+		next = "helix"
+	default:
+		next = "default"
+	}
+	a.setKeyboardMode(next)
+	a.config.Save()
+	a.statusBar.SetMessage("Keyboard mode: " + a.editor.KeyMode().Mode())
 }
 
 // Run starts the application

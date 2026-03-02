@@ -10,13 +10,16 @@ import (
 // StatusBar displays file info, cursor position, and shortcut hints
 type StatusBar struct {
 	*tview.Box
-	filename  string
-	line      int
-	col       int
-	language  string
-	encoding  string
-	modified  bool
-	message   string
+	filename    string
+	line        int
+	col         int
+	language    string
+	encoding    string
+	modified    bool
+	message     string
+	modeLabel   string
+	modePending string
+	commandText string
 }
 
 func NewStatusBar() *StatusBar {
@@ -42,6 +45,15 @@ func (sb *StatusBar) SetMessage(msg string) {
 	sb.message = msg
 }
 
+func (sb *StatusBar) SetModeInfo(label, pending string) {
+	sb.modeLabel = label
+	sb.modePending = pending
+}
+
+func (sb *StatusBar) SetCommandText(text string) {
+	sb.commandText = text
+}
+
 func (sb *StatusBar) Draw(screen tcell.Screen) {
 	sb.Box.DrawForSubclass(screen, sb)
 	x, y, width, _ := sb.GetInnerRect()
@@ -53,10 +65,27 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 		screen.SetContent(cx, y, ' ', nil, style)
 	}
 
-	// Left side: filename and position
+	// If showing command text (Vi : mode), render just that
+	if sb.commandText != "" {
+		for i, ch := range sb.commandText {
+			if x+i < x+width {
+				screen.SetContent(x+i, y, ch, nil, style)
+			}
+		}
+		return
+	}
+
+	// Left side: mode indicator + filename and position
 	left := ""
+	if sb.modeLabel != "" {
+		left = " " + sb.modeLabel
+		if sb.modePending != "" {
+			left += " " + sb.modePending
+		}
+		left += " |"
+	}
 	if sb.filename != "" {
-		left = " " + sb.filename
+		left += " " + sb.filename
 		if sb.modified {
 			left += " [modified]"
 		}
@@ -66,8 +95,8 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 		}
 		left += " | " + sb.encoding
 	} else if sb.message != "" {
-		left = " " + sb.message
-	} else {
+		left += " " + sb.message
+	} else if left == "" {
 		left = " NumenText"
 	}
 

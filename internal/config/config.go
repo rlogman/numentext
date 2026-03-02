@@ -7,20 +7,22 @@ import (
 )
 
 type Config struct {
-	RecentFiles []string `json:"recent_files"`
-	TabSize     int      `json:"tab_size"`
-	Theme       string   `json:"theme"`
-	ShowLineNum bool     `json:"show_line_numbers"`
-	WordWrap    bool     `json:"word_wrap"`
+	RecentFiles  []string `json:"recent_files"`
+	TabSize      int      `json:"tab_size"`
+	Theme        string   `json:"theme"`
+	ShowLineNum  bool     `json:"show_line_numbers"`
+	WordWrap     bool     `json:"word_wrap"`
+	KeyboardMode string   `json:"keyboard_mode"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		RecentFiles: []string{},
-		TabSize:     4,
-		Theme:       "borland",
-		ShowLineNum: true,
-		WordWrap:    false,
+		RecentFiles:  []string{},
+		TabSize:      4,
+		Theme:        "borland",
+		ShowLineNum:  true,
+		WordWrap:     false,
+		KeyboardMode: "default",
 	}
 }
 
